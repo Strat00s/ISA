@@ -1,0 +1,1 @@
+xcopy "O:\This PC\Documents\0_Projects\ISA\dissector.lua" "C:\Users\lbast\AppData\Roaming\Wireshark\plugins\3.4\" /y

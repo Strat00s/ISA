@@ -1,0 +1,1 @@
+cp ~/Documents/0_Projects/ISA/dissector.lua ~/.local/lib/wireshark/plugins/3.2/dissector.lua

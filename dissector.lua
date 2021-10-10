@@ -12,6 +12,7 @@ Payload_entry = Proto("ISA_payload", "Payload")
 Payload_length  = ProtoField.int16("isa.payload.length"  , "Payload length", base.DEC)
 Payload_raw     = ProtoField.string("isa.payload.raw"    , "Payload (raw)")
 Payload_msg_cnt = ProtoField.int16("isa.payload.msg_cnt" , "Message count", base.DEC)
+--TODO add payload session hash
 Payload_entry.fields = {Payload_length, Payload_raw, Payload_msg_cnt}
 
 --message sub tree
@@ -74,7 +75,7 @@ function SplitMessages(payload)
     --single message
     if (payload:sub(2, 2) == "\"") then
         table.insert(list, 1)
-        table.insert(list, SplitLine(payload:sub(2, #payload - 1), " "))
+        table.insert(list, SplitLine(payload:sub(2, #payload - 1), " \""))
         return list
     end
 
@@ -83,7 +84,7 @@ function SplitMessages(payload)
         local message_splits = SplitLine(payload, ")")  --remove bracket using sub and then split by left over brackets
         table.insert(list, #message_splits - 2)         --save message count (not corret because extra brackets)
         for i = 1, list[1] do
-            table.insert(list, SplitLine(message_splits[i][2]:sub(3), " "))
+            table.insert(list, SplitLine(message_splits[i][2]:sub(3), " \""))
         end
         return list
     end
@@ -175,7 +176,7 @@ function Isa_entry.dissector(buffer, pinfo, tree)
     else
         isa_tree:add(Command, code)                                                     --add command
         arguments_tree = isa_tree:add(Arguments_entry, payload_buffer(), "Argument(s)") --add arguments entry
-        arguments = SplitLine(payload_buffer():string(), " ")                           --get arguments
+        arguments = SplitLine(payload_buffer():string(), " \"")                           --get arguments
         arguments_tree:add(Argument_cnt, #arguments)                                    --add argument count
 
         if (code == "logout" or code == "list") then
@@ -186,6 +187,8 @@ function Isa_entry.dissector(buffer, pinfo, tree)
             arguments_tree:add(Argument_passwd_hash, payload_buffer(arguments[2][1] - 1, #arguments[2][2] - 2)) --add password hash
         end
         if (code == "fetch") then
+            --split it again specifically for fetch (space only) to fix id fix
+            arguments = SplitLine(payload_buffer():string(), " ")
             arguments_tree:add(Argument_session_hash, payload_buffer(arguments[1][1] - 1, #arguments[1][2] - 2))
             arguments_tree:add(Argument_msg_id, payload_buffer(arguments[2][1]))    --add message id
         end

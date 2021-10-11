@@ -41,11 +41,8 @@ struct LineArgs{
 //TODO save and load session hash
 
 
-void signalCallback(int signal){
-           cerr << "user break" << endl;
-           cerr << "context...:" << endl;
-           cerr << " .../client/client.rkt:59:0" << endl;
-           cerr << " body of '#%mzc:client" << endl;
+void signalCallback(int signal) {
+           cerr << "Process interrupted by the user" << endl;
            exit(1);
 }
 
@@ -211,16 +208,7 @@ int main(int argc, char *argv[]) {
     memcpy(&server.sin_addr, host_entry->h_addr_list[0], host_entry->h_length); //set ip
     
     //try and connect
-    if (connect(socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) {
-        cerr << "tcp-connect: connection failed" << endl;
-        cerr << "  hostname: " << line_args.address << endl;
-        cerr << "  port number: " << to_string(line_args.port) << endl;
-        cerr << "  system error: Connection refused; errno=111" << endl;
-        cerr << "  context...:" << endl;
-        cerr << "   .../client/client.rkt:59:0" << endl;
-        cerr << "   body of '#%mzc:client" << endl;
-        return 1;
-    }
+    if (connect(socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) return errorExit("ERROR connecting to host", 1);
 
     //create requiest payload by adding command and arguments together
     request = "(" + line_args.command;

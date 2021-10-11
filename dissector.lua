@@ -203,4 +203,4 @@ function Isa_entry.dissector(buffer, pinfo, tree)
 end
 
 local tcp_port = DissectorTable.get("tcp.port") --specify port for ISA protocol
-tcp_port:add(16853, Isa_entry)
+tcp_port:add(32323, Isa_entry)

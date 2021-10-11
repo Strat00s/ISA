@@ -3,7 +3,7 @@
 #include <unistd.h>
 #include <getopt.h>
 #include <string.h>
-//#include <strings.h>
+#include <signal.h>
 #include <iostream>
 #include <vector>
 
@@ -17,6 +17,11 @@ using namespace std;
 
 #define DEFAULT_ADDRESS "localhost"
 #define DEFAULT_PORT 32323
+#define MAX_BUFFER_SIZE 256
+#define OK_START 5      //start of payload from ok response
+#define ERR_START 6     //      -- || --        err response
+#define OK_GARBAGE 7    //(ok "")
+#define ERR_GARBAGE 8   //(err "")
 
 struct LineArgs{
     string address = DEFAULT_ADDRESS;
@@ -35,9 +40,15 @@ struct LineArgs{
 
 //TODO save and load session hash
 
-//TODO move argument parsing to own function
 
-//TODO test this abomination
+void signalCallback(int signal){
+           cerr << "user break" << endl;
+           cerr << "context...:" << endl;
+           cerr << " .../client/client.rkt:59:0" << endl;
+           cerr << " body of '#%mzc:client" << endl;
+           exit(1);
+}
+
 int errorExit(string msg, int err_code) {
     cout << msg << endl;
     return err_code; //exit(err_code);
@@ -164,65 +175,84 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
     return -1;
 }
 
-
-void error(const char *msg)
-{
-    perror(msg);
-    exit(0);
-}
-
-//TODO fix argument response to look the same as reference client
 int main(int argc, char *argv[]) {
+    signal (SIGINT, signalCallback);
+
     /*----(argument parsing)----*/
     LineArgs line_args;
     int early_exit = parseArguments(argc, argv, &line_args);
     if (early_exit >= 0) return early_exit;
 
-    cout << "port: " << line_args.port << endl;
-    cout << "address: " << line_args.address << endl;
-    cout << "command: " << line_args.command << " ";
-    for (int i = 0; i < line_args.arguments.size(); i++) {
-        cout << line_args.arguments.at(i) << " ";
-    }
-    cout << endl;
+    //cout << "port: " << line_args.port << endl;
+    //cout << "address: " << line_args.address << endl;
+    //cout << "command: " << line_args.command << " ";
+    //for (int i = 0; i < line_args.arguments.size(); i++) {
+    //    cout << line_args.arguments.at(i) << " ";
+    //}
+    //cout << endl;
 
 
+    /*----(socket stuff)----*/
     //TODO comments and understand/rewamp
+    int socket_fd, wr;
     struct sockaddr_in server;
     struct hostent *host_entry;
-    char buffer[256];
+    char buffer[MAX_BUFFER_SIZE] = {0};
+    string request, response = "";
     
-    int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    socket_fd = socket(AF_INET, SOCK_STREAM, 0);    //create socket file descriptor
     if (socket_fd < 0) return errorExit("ERROR opening socket", 1);
     
-    host_entry = gethostbyname(line_args.address.c_str());
+    host_entry = gethostbyname(line_args.address.c_str());  //get host (ip/hostname)
     if (host_entry == NULL) return errorExit("ERROR, no such host", 1);
     
     server.sin_family = AF_INET;
-    server.sin_port = htons(line_args.port);
-    memcpy(&server.sin_addr, host_entry->h_addr_list[0], host_entry->h_length);
+    server.sin_port = htons(line_args.port);                                    //set port
+    memcpy(&server.sin_addr, host_entry->h_addr_list[0], host_entry->h_length); //set ip
     
-    if (connect(socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) return errorExit("ERROR connecting", 1);
-
-    string request = "(" + line_args.command;//   "(register \"test\" \"dGVzdA==\")";
-    for (int i = 0; i < line_args.arguments.size(); i++) {
-        request = request + " \"" + line_args.arguments.at(i) + "\"";
+    //try and connect
+    if (connect(socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) {
+        cerr << "tcp-connect: connection failed" << endl;
+        cerr << "  hostname: " << line_args.address << endl;
+        cerr << "  port number: " << to_string(line_args.port) << endl;
+        cerr << "  system error: Connection refused; errno=111" << endl;
+        cerr << "  context...:" << endl;
+        cerr << "   .../client/client.rkt:59:0" << endl;
+        cerr << "   body of '#%mzc:client" << endl;
+        return 1;
     }
-    request = request + ")";
+
+    //create requiest payload by adding command and arguments together
+    request = "(" + line_args.command;
+    for (int i = 0; i < line_args.arguments.size(); i++) {
+        request += " \"" + line_args.arguments.at(i) + "\"";
+    }
+    request += ")";
+
+    //cout << "request: " << request << endl;
     
-    int n = write(socket_fd, request.c_str(), request.length());
-    if (n < 0) 
-         error("ERROR writing to socket");
-    
-    bzero(buffer,256);
-    
-    n = read(socket_fd, buffer, 255);
-    if (n < 0) 
-         error("ERROR reading from socket");
-    
-    printf("%s\n", buffer);
-    
-    close(socket_fd);
-    
+    //write request to socket
+    wr = write(socket_fd, request.c_str(), request.length());
+    if (wr < 0) return errorExit("ERROR writing to socket", 2);
+       
+    //read from socket
+    do {
+        wr = read(socket_fd, buffer, MAX_BUFFER_SIZE - 1);  //read
+        response += string(buffer);                         //save
+        memset(buffer, 0, MAX_BUFFER_SIZE);                 //clear
+    } while(wr > 0);
+    if (wr < 0) return errorExit("ERROR reading from socket", 1);
+    close(socket_fd);   //close socket
+
+    //cout << response << endl;
+
+    if (response.substr(1, 2) == "ok") {
+        cout << "SUCCESS: " << response.substr(OK_START, response.length() - OK_GARBAGE) << endl;   //payload length = response.length - 2(brackets) - 2(ok) - 2("") - 1(' ') -> response_len - 7
+    }
+    else if (response.substr(1, 3) == "err") {
+        cout << "ERROR: " << response.substr(ERR_START, response.length() - ERR_GARBAGE) << endl;   //same as OK, but err is one longer -> response_len - 8
+    }
+    else return errorExit("Unknown response", 1);
+
     return 0;
 }

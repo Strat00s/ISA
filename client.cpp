@@ -2,7 +2,8 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <getopt.h>
-#include <string>
+#include <string.h>
+//#include <strings.h>
 #include <iostream>
 #include <vector>
 
@@ -10,39 +11,12 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
+#include <arpa/inet.h>
 
 using namespace std;
 
 #define DEFAULT_ADDRESS "localhost"
 #define DEFAULT_PORT 32323
-
-//TODO argument parsing
-//TODO response parsing
-/*
-[isa@isa isa]$ ./client_d --help
-usage: client [ <option> ... ] <command> [<args>] ...
-
-<option> is one of
-
-  -a <addr>, --address <addr>
-     Server hostname or address to connect to
-  -p <port>, --port <port>
-     Server port to connect to
-  --help, -h
-     Show this help
-  --
-     Do not treat any remaining argument as a switch (at this level)
-
- Multiple single-letter switches can be combined after
- one `-`. For example, `-h-` is the same as `-h --`.
- Supported commands:
-   register <username> <password>
-   login <username> <password>
-   list
-   send <recipient> <subject> <body>
-   fetch <id>
-   logout
-*/
 
 struct LineArgs{
     string address = DEFAULT_ADDRESS;
@@ -51,13 +25,15 @@ struct LineArgs{
     vector<string> arguments;
 };
 
-
+//TODO base64
 //string base64Encode(string s) {
 //
 //}
 //string base64Decode(string s) {
 //
 //}
+
+//TODO save and load session hash
 
 //TODO move argument parsing to own function
 
@@ -79,10 +55,7 @@ int StringToNumber(string s) {
     return stoi(s);
 }
 
-//TODO fix argument response to look the same as reference client
-int main(int argc, char *argv[]) {
-    /*----(argument parsing)----*/
-    LineArgs line_args;
+int parseArguments(int argc, char *argv[], LineArgs *line_args) {
     bool help = false;
     bool addr_set = false;
     bool port_set = false;
@@ -95,6 +68,7 @@ int main(int argc, char *argv[]) {
         //help parsing
         if (argument == "--help" || argument == "-h") help = true;
 
+        //TODO address and port have some duplicate code
         //address parsing
         else if (argument == "--address" || argument == "-a") {
             //check if address parameter was already used
@@ -103,7 +77,7 @@ int main(int argc, char *argv[]) {
 
             //do we have enough arguments
             if (argc < i + 2) return errorExit("client: the \"" + argument + "\" option needs 1 argument, but 0 provided", 1);
-            line_args.address = string(argv[i + 1]);  //save address
+            line_args->address = string(argv[i + 1]);  //save address
             i++;                            //skip one argument as we are using it as address
         }
 
@@ -113,49 +87,50 @@ int main(int argc, char *argv[]) {
             port_set = true;
 
             if (argc < i + 2) return errorExit("client: the \"" + argument + "\" option needs 1 argument, but 0 provided", 1);
-            line_args.port = StringToNumber(string(argv[i + 1]));
+            line_args->port = StringToNumber(string(argv[i + 1]));
 
             //return if port is not a number
-            if (line_args.port < 0) return errorExit("Port number is not a string", 1);
+            if (line_args->port < 0) return errorExit("Port number is not a string", 1);
             i++;
         }
 
         //command and argument "parsing"
         //register and login
+        //TODO maybe some duplicate code
         else if (argument == "register" || argument == "login") {
             if (argc - (i + 1) != 2) return errorExit(argument + " <username> <password>", 1);
-            line_args.command = argument;
-            line_args.arguments.push_back(string(argv[i + 1]));
-            line_args.arguments.push_back(string(argv[i + 2]));
+            line_args->command = argument;
+            line_args->arguments.push_back(string(argv[i + 1]));
+            line_args->arguments.push_back(string(argv[i + 2]));
             break;
         }
 
         //list
         else if (argument == "list" || argument == "logout") {
             if (argc - (i + 1) != 0) return errorExit(argument, 1);
-            line_args.command = argument;
+            line_args->command = argument;
             break;
         }
 
         //send
         else if (argument == "send") {
             if (argc - (i + 1) != 3) return errorExit(argument + " <recipient> <subject> <body>", 1);
-            line_args.command = argument;
-            line_args.arguments.push_back(string(argv[i + 1]));
-            line_args.arguments.push_back(string(argv[i + 2]));
-            line_args.arguments.push_back(string(argv[i + 3]));
+            line_args->command = argument;
+            line_args->arguments.push_back(string(argv[i + 1]));
+            line_args->arguments.push_back(string(argv[i + 2]));
+            line_args->arguments.push_back(string(argv[i + 3]));
             break;
         }
 
         //fetch
         else if (argument == "fetch") {
             if (argc - (i + 1) != 1) return errorExit(argument + " <id>", 1);
-            line_args.command = argument;
-            line_args.arguments.push_back(string(argv[i + 1]));
+            line_args->command = argument;
+            line_args->arguments.push_back(string(argv[i + 1]));
             break;
         }
 
-        //unknown command/switche
+        //unknown command/switch
         else {
             if (argument.at(0) == '-') return errorExit("client: unknown switch: " + argument, 1);
             return errorExit("unknown command", 1);
@@ -185,7 +160,23 @@ int main(int argc, char *argv[]) {
         return 0;
     }
 
-    if(line_args.command == "NONE") return errorExit("client: expects <command> [<args>] ... on the command line, given 0 arguments", 1);
+    if(line_args->command == "NONE") return errorExit("client: expects <command> [<args>] ... on the command line, given 0 arguments", 1);
+    return -1;
+}
+
+
+void error(const char *msg)
+{
+    perror(msg);
+    exit(0);
+}
+
+//TODO fix argument response to look the same as reference client
+int main(int argc, char *argv[]) {
+    /*----(argument parsing)----*/
+    LineArgs line_args;
+    int early_exit = parseArguments(argc, argv, &line_args);
+    if (early_exit >= 0) return early_exit;
 
     cout << "port: " << line_args.port << endl;
     cout << "address: " << line_args.address << endl;
@@ -194,46 +185,44 @@ int main(int argc, char *argv[]) {
         cout << line_args.arguments.at(i) << " ";
     }
     cout << endl;
-/*
-    int sockfd, portno, n;
-    struct sockaddr_in serv_addr;
-    struct hostent *server;
 
+
+    //TODO comments and understand/rewamp
+    struct sockaddr_in server;
+    struct hostent *host_entry;
     char buffer[256];
-    if (argc < 3) {
-       fprintf(stderr,"usage %s hostname port\n", argv[0]);
-       exit(0);
+    
+    int socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (socket_fd < 0) return errorExit("ERROR opening socket", 1);
+    
+    host_entry = gethostbyname(line_args.address.c_str());
+    if (host_entry == NULL) return errorExit("ERROR, no such host", 1);
+    
+    server.sin_family = AF_INET;
+    server.sin_port = htons(line_args.port);
+    memcpy(&server.sin_addr, host_entry->h_addr_list[0], host_entry->h_length);
+    
+    if (connect(socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) return errorExit("ERROR connecting", 1);
+
+    string request = "(" + line_args.command;//   "(register \"test\" \"dGVzdA==\")";
+    for (int i = 0; i < line_args.arguments.size(); i++) {
+        request = request + " \"" + line_args.arguments.at(i) + "\"";
     }
-    portno = atoi(argv[2]);
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd < 0) 
-        error("ERROR opening socket");
-    server = gethostbyname(argv[1]);
-    if (server == NULL) {
-        fprintf(stderr,"ERROR, no such host\n");
-        exit(0);
-    }
-    bzero((char *) &serv_addr, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    bcopy((char *)server->h_addr, 
-         (char *)&serv_addr.sin_addr.s_addr,
-         server->h_length);
-    serv_addr.sin_port = htons(portno);
-    if (connect(sockfd, (struct sockaddr *) &serv_addr, sizeof(serv_addr)) < 0) 
-        error("ERROR connecting");
-    printf("Please enter the message: ");
-    bzero(buffer,256);
-    fgets(buffer,255,stdin);
-    n = write(sockfd, buffer, strlen(buffer));
+    request = request + ")";
+    
+    int n = write(socket_fd, request.c_str(), request.length());
     if (n < 0) 
          error("ERROR writing to socket");
+    
     bzero(buffer,256);
-    n = read(sockfd, buffer, 255);
+    
+    n = read(socket_fd, buffer, 255);
     if (n < 0) 
          error("ERROR reading from socket");
+    
     printf("%s\n", buffer);
-    close(sockfd);
+    
+    close(socket_fd);
+    
     return 0;
-    */
-   return 0;
 }

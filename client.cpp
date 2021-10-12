@@ -8,14 +8,13 @@
 #include <fstream>
 #include <vector>
 #include <algorithm>
+#include <regex>
 
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <netdb.h>
 #include <arpa/inet.h>
-
-using namespace std;
 
 #define DEFAULT_ADDRESS "localhost"
 #define DEFAULT_PORT 32323
@@ -24,6 +23,8 @@ using namespace std;
 #define ERR_START 5     //      -- || --        err response
 #define RESPONSE_END 1  //')'
 #define SESSION_HASH_FILE "login-token"
+
+using namespace std;
 
 struct LineArgs{
     string address = DEFAULT_ADDRESS;
@@ -43,6 +44,7 @@ int errorExit(string msg, int err_code) {
     return err_code; //exit(err_code);
 }
 
+
 //TODO base64
 //string base64Encode(string s) {
 //
@@ -51,6 +53,8 @@ int errorExit(string msg, int err_code) {
 //
 //}
 
+
+/*----(file operations)----*/
 //TODO save and load session hash
 //save hash to file
 int saveHash(string hash) {
@@ -71,33 +75,59 @@ string loadHash() {
 }
 
 
-//TODO split by delimiter
-        //WARNING regex might be required
-//split string
-void splitByDelimiter(string s, string del) {
-    cout << s << endl;
-    int start_index = 0;
-    int index;
-    //cout << "Del: " << count(s.begin(), s.end(), del) << endl;
-    //while (true) {
-    //    s.
-    //}
-    
+/*----(String operations)----*/
+//split string by regex delimiter
+vector<string> splitByDelimiter(string s, string rgx_exp) {
+    vector<string> splits;
+    int old_index = 0;
+    regex rgx(rgx_exp);
+    //TODO comments
+    for (auto it = sregex_iterator(s.begin(), s.end(), rgx); it != sregex_iterator(); it++) {
+        splits.push_back(s.substr(old_index + 1, it->position()  - old_index));
+        old_index = it->position() + 1; //move to next one
+    }
+    splits.push_back(s.substr(old_index + 1, s.length() - old_index - 2));
+    return splits;
 }
 
 //check and convert string to number
 int StringToNumber(string s) {
     //check if all chars are numbers
     for (int i = 0; i < s.length(); i++) {
-        if (!isdigit(s.at(i))) {
-            cout << s.at(i) << " is not a number" << endl;
-            return -1;
-        }
+        if (!isdigit(s.at(i))) return -1;
     }
     return stoi(s);
 }
 
-//FIX escape special characters
+string ltrim(string s) {
+    size_t start = s.find_first_not_of(" \n\r\t\f\v");
+    if (start == string::npos) return s;
+    return s.substr(start);
+}
+ 
+string rtrim(string s) {
+    size_t end = s.find_last_not_of(" \n\r\t\f\v");
+    if (end == string::npos) return s;
+    return s.substr(0, end + 1);
+}
+ 
+string trim(string s) {
+    s = ltrim(s);
+    s = rtrim(s);
+    return s;
+}
+
+//replace x with y in s
+string replaceInString(string s, string x, string y) {
+    int pos = 0;
+    while ((pos = s.find(x, pos)) != string::npos) {
+        s.replace(pos, x.length(), y);
+        pos = pos + y.length();  //skip the newly escaped character
+    }
+    return s;
+}
+
+
 //get arguments, commands and so on
 int parseArguments(int argc, char *argv[], LineArgs *line_args) {
     bool help = false;
@@ -205,8 +235,16 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
     }
 
     if(line_args->command == "NONE") return errorExit("client: expects <command> [<args>] ... on the command line, given 0 arguments", 1);
+    
+    //"fix" all arguments to make them protocol correct
+    for (int i = 0; i < line_args->arguments.size(); i++) {
+        line_args->arguments.at(i) = trim(line_args->arguments.at(i));  //trim spaces for later easier response parsing
+        line_args->arguments.at(i) = replaceInString(line_args->arguments.at(i), "\\", "\\\\"); //escape '\'
+        line_args->arguments.at(i) = replaceInString(line_args->arguments.at(i), "\"", "\\\""); //escape '"'
+    }
     return -1;
 }
+
 
 int main(int argc, char *argv[]) {
     signal (SIGINT, signalCallback);
@@ -225,8 +263,8 @@ int main(int argc, char *argv[]) {
     cout << endl;
 
 
+    //TODO move to won function
     /*----(socket stuff)----*/
-    //TODO comments and understand/rewamp
     int socket_fd, wr;
     struct sockaddr_in server;
     struct hostent *host_entry;
@@ -244,7 +282,7 @@ int main(int argc, char *argv[]) {
     memcpy(&server.sin_addr, host_entry->h_addr_list[0], host_entry->h_length); //set ip
     
     //try and connect
-    if (connect(socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) return errorExit("ERROR connecting to host", 1);
+    if (connect(socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) return errorExit("Filed to connect to host", 1);
 
     //create requiest payload with command
     request = "(" + line_args.command;
@@ -281,14 +319,43 @@ int main(int argc, char *argv[]) {
     close(socket_fd);   //close socket
 
     cout << response << endl;
+    cout << response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)) << endl;
 
-    //TODO format message on list, save hash on login, 
+    //TODO escape sequences
     if (response.substr(1, 2) == "ok") {
-        splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), " \"");
-        //cout << "SUCCESS: " << response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)) << endl;
+        cout << "SUCCESS: ";
+        vector<string> splits;
+
+        if (line_args.command == "login") {
+            splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\" \"");
+            if (saveHash(splits[1].substr(0, splits[1].length()) + "\"")) return errorExit("ERROR failed to save session hash", 1);
+            cout << splits[0].substr(0, splits[0].length() - 1) << endl;
+        }
+
+        if (line_args.command == "fetch") {
+            splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\" \"");
+            cout << endl << endl;
+            cout << "From: " << splits[0].substr(1, splits[0].length() - 2) << endl;
+            cout << "Subject: " << splits[1].substr(1, splits[1].length() - 2) << endl;
+            cout << splits[2].substr(1, splits[2].length() - 2);
+        }
+
+        if (line_args.command == "list") {
+            splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\\) \\(\\d");
+            cout << endl;
+            for (int i = 0; i < splits.size(); i++) {
+                cout << splits[i].substr(1, 1) << ":" << endl;
+                //cout << splits[i] << endl;
+                vector<string> single_msg = splitByDelimiter(splits[i].substr(2), "\" \"");
+                cout << "  From: " << single_msg[0].substr(1, single_msg[0].length() - 2) << endl;
+                cout << "  Subject: " << single_msg[1].substr(1, single_msg[1].length() - 2) << endl;
+            }
+        }
+
+        else cout << response.substr(OK_START + 1, response.length() - (OK_START + RESPONSE_END + 2)) << endl;
     }
     else if (response.substr(1, 3) == "err") {
-        cout << "ERROR: " << response.substr(ERR_START, response.length() - (ERR_START + RESPONSE_END)) << endl;
+        cout << "ERROR: " << response.substr(ERR_START + 1, response.length() - (ERR_START + RESPONSE_END + 2)) << endl;
     }
     else return errorExit("Unknown response", 1);
 

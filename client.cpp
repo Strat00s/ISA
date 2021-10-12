@@ -5,7 +5,9 @@
 #include <string.h>
 #include <signal.h>
 #include <iostream>
+#include <fstream>
 #include <vector>
+#include <algorithm>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -18,10 +20,10 @@ using namespace std;
 #define DEFAULT_ADDRESS "localhost"
 #define DEFAULT_PORT 32323
 #define MAX_BUFFER_SIZE 256
-#define OK_START 5      //start of payload from ok response
-#define ERR_START 6     //      -- || --        err response
-#define OK_GARBAGE 7    //(ok "")
-#define ERR_GARBAGE 8   //(err "")
+#define OK_START 4      //start of payload from ok response
+#define ERR_START 5     //      -- || --        err response
+#define RESPONSE_END 1  //')'
+#define SESSION_HASH_FILE "login-token"
 
 struct LineArgs{
     string address = DEFAULT_ADDRESS;
@@ -29,16 +31,6 @@ struct LineArgs{
     string command = "NONE";
     vector<string> arguments;
 };
-
-//TODO base64
-//string base64Encode(string s) {
-//
-//}
-//string base64Decode(string s) {
-//
-//}
-
-//TODO save and load session hash
 
 
 void signalCallback(int signal) {
@@ -51,7 +43,49 @@ int errorExit(string msg, int err_code) {
     return err_code; //exit(err_code);
 }
 
-//TODO + - .
+//TODO base64
+//string base64Encode(string s) {
+//
+//}
+//string base64Decode(string s) {
+//
+//}
+
+//TODO save and load session hash
+//save hash to file
+int saveHash(string hash) {
+    ofstream hash_file(SESSION_HASH_FILE, ofstream::trunc); //open file in overwrite mode
+    if (hash_file.fail()) return 1;
+    hash_file << hash;
+    hash_file.close();
+    return 0;
+}
+
+//load hash from file
+string loadHash() {
+    string session_hash;
+    ifstream hash_file(SESSION_HASH_FILE);
+    if (hash_file.fail()) return ".";   //if something went wrong, return character that can't be created via base64 encoding
+    getline(hash_file, session_hash);   //get hash from file
+    return session_hash;
+}
+
+
+//TODO split by delimiter
+        //WARNING regex might be required
+//split string
+void splitByDelimiter(string s, string del) {
+    cout << s << endl;
+    int start_index = 0;
+    int index;
+    //cout << "Del: " << count(s.begin(), s.end(), del) << endl;
+    //while (true) {
+    //    s.
+    //}
+    
+}
+
+//check and convert string to number
 int StringToNumber(string s) {
     //check if all chars are numbers
     for (int i = 0; i < s.length(); i++) {
@@ -63,6 +97,8 @@ int StringToNumber(string s) {
     return stoi(s);
 }
 
+//FIX escape special characters
+//get arguments, commands and so on
 int parseArguments(int argc, char *argv[], LineArgs *line_args) {
     bool help = false;
     bool addr_set = false;
@@ -180,13 +216,13 @@ int main(int argc, char *argv[]) {
     int early_exit = parseArguments(argc, argv, &line_args);
     if (early_exit >= 0) return early_exit;
 
-    //cout << "port: " << line_args.port << endl;
-    //cout << "address: " << line_args.address << endl;
-    //cout << "command: " << line_args.command << " ";
-    //for (int i = 0; i < line_args.arguments.size(); i++) {
-    //    cout << line_args.arguments.at(i) << " ";
-    //}
-    //cout << endl;
+    cout << "port: " << line_args.port << endl;
+    cout << "address: " << line_args.address << endl;
+    cout << "command: " << line_args.command << " ";
+    for (int i = 0; i < line_args.arguments.size(); i++) {
+        cout << line_args.arguments.at(i) << " ";
+    }
+    cout << endl;
 
 
     /*----(socket stuff)----*/
@@ -210,14 +246,26 @@ int main(int argc, char *argv[]) {
     //try and connect
     if (connect(socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) return errorExit("ERROR connecting to host", 1);
 
-    //create requiest payload by adding command and arguments together
+    //create requiest payload with command
     request = "(" + line_args.command;
-    for (int i = 0; i < line_args.arguments.size(); i++) {
-        request += " \"" + line_args.arguments.at(i) + "\"";
+    
+    //add hash only on supported commands
+    if (line_args.command != "login" && line_args.command != "register") {
+        string hash = loadHash();
+        if (hash == ".") return errorExit("Not logged in", 1);
+        request += " " + hash;
+    }
+
+    //add arguments to payload (fetch is special)
+    if (line_args.command == "fetch") request += line_args.arguments.at(0);
+    else {
+        for (int i = 0; i < line_args.arguments.size(); i++) {
+            request += " \"" + line_args.arguments.at(i) + "\"";
+        }
     }
     request += ")";
 
-    //cout << "request: " << request << endl;
+    cout << "request: " << request << endl;
     
     //write request to socket
     wr = write(socket_fd, request.c_str(), request.length());
@@ -232,13 +280,15 @@ int main(int argc, char *argv[]) {
     if (wr < 0) return errorExit("ERROR reading from socket", 1);
     close(socket_fd);   //close socket
 
-    //cout << response << endl;
+    cout << response << endl;
 
+    //TODO format message on list, save hash on login, 
     if (response.substr(1, 2) == "ok") {
-        cout << "SUCCESS: " << response.substr(OK_START, response.length() - OK_GARBAGE) << endl;   //payload length = response.length - 2(brackets) - 2(ok) - 2("") - 1(' ') -> response_len - 7
+        splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), " \"");
+        //cout << "SUCCESS: " << response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)) << endl;
     }
     else if (response.substr(1, 3) == "err") {
-        cout << "ERROR: " << response.substr(ERR_START, response.length() - ERR_GARBAGE) << endl;   //same as OK, but err is one longer -> response_len - 8
+        cout << "ERROR: " << response.substr(ERR_START, response.length() - (ERR_START + RESPONSE_END)) << endl;
     }
     else return errorExit("Unknown response", 1);
 

@@ -221,9 +221,12 @@ int sendAndReceive(LineArgs *line_args) {
     cout << response << endl;
     cout << response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)) << endl;
 
-    //TODO escape sequences
+
     if (response.substr(1, 2) == "ok") {
         cout << "SUCCESS: ";
+        response = replaceInString(response, "\\\\", "\\"); //un-escape '\'
+        response = replaceInString(response, "\\n", "\n");  //un-escape '\n'
+        response = replaceInString(response, "\\\"", "\""); //un-escape '"'
         vector<string> splits;
 
         //command specific parsing
@@ -239,6 +242,7 @@ int sendAndReceive(LineArgs *line_args) {
             cout << endl << endl;
             cout << "From: " << splits[0].substr(1, splits[0].length() - 2) << endl;
             cout << "Subject: " << splits[1].substr(1, splits[1].length() - 2) << endl;
+            cout << endl;
             cout << splits[2].substr(1, splits[2].length() - 2);
         }
 

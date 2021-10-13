@@ -36,12 +36,12 @@ struct LineArgs{
 
 
 void signalCallback(int signal) {
-           cerr << "Process interrupted by the user" << endl;
-           exit(1);
+    cerr << "Process interrupted by the user" << endl;
+    exit(1);
 }
 
 int errorExit(string msg, int err_code) {
-    cout << msg << endl;
+    cerr << msg << endl;
     return err_code; //exit(err_code);
 }
 
@@ -77,11 +77,11 @@ string base64Encode(string s) {
 }
 
 /*----(file operations)----*/
-//TODO save and load session hash
 //save hash to file
 int saveHash(string hash) {
     ofstream hash_file(SESSION_HASH_FILE, ofstream::trunc); //open file in overwrite mode
-    if (hash_file.fail()) return 1;
+    if (hash_file.fail())
+        return 1;
     hash_file << hash;
     hash_file.close();
     return 0;
@@ -91,7 +91,8 @@ int saveHash(string hash) {
 string loadHash() {
     string session_hash;
     ifstream hash_file(SESSION_HASH_FILE);
-    if (hash_file.fail()) return ".";   //if something went wrong, return character that can't be created via base64 encoding
+    if (hash_file.fail())
+        return ".";   //if something went wrong, return character that can't be created via base64 encoding
     getline(hash_file, session_hash);   //get hash from file
     return session_hash;
 }
@@ -103,7 +104,8 @@ vector<string> splitByDelimiter(string s, string rgx_exp) {
     vector<string> splits;
     int old_index = 0;
     regex rgx(rgx_exp);
-    //TODO comments
+    
+    //iterate and split string on index
     for (auto it = sregex_iterator(s.begin(), s.end(), rgx); it != sregex_iterator(); it++) {
         splits.push_back(s.substr(old_index + 1, it->position()  - old_index));
         old_index = it->position() + 1; //move to next one
@@ -116,20 +118,24 @@ vector<string> splitByDelimiter(string s, string rgx_exp) {
 int StringToNumber(string s) {
     //check if all chars are numbers
     for (int i = 0; i < s.length(); i++) {
-        if (!isdigit(s[i])) return -1;
+        if (!isdigit(s[i]))
+            return -1;
     }
     return stoi(s);
 }
 
+//TODO comments
 string ltrim(string s) {
     size_t start = s.find_first_not_of(" \n\r\t\f\v");
-    if (start == string::npos) return s;
+    if (start == string::npos)
+        return s;
     return s.substr(start);
 }
  
 string rtrim(string s) {
     size_t end = s.find_last_not_of(" \n\r\t\f\v");
-    if (end == string::npos) return s;
+    if (end == string::npos)
+        return s;
     return s.substr(0, end + 1);
 }
  
@@ -149,6 +155,116 @@ string replaceInString(string s, string x, string y) {
     return s;
 }
 
+int sendAndReceive(LineArgs *line_args) {
+    int socket_fd, wr;
+    struct sockaddr_in server;
+    struct hostent *host_entry;
+    char buffer[MAX_BUFFER_SIZE] = {0};
+    string request, response = "";
+    
+    //create socket file descriptor
+    socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (socket_fd < 0) 
+        return errorExit("Failed to open socket", 1);
+    
+    //get host (ip/hostname)
+    host_entry = gethostbyname(line_args->address.c_str());
+    if (host_entry == NULL) 
+        return errorExit("Err: no such host", 1);
+    
+    server.sin_family = AF_INET;                                                //set address family
+    server.sin_port = htons(line_args->port);                                   //set port
+    memcpy(&server.sin_addr, host_entry->h_addr_list[0], host_entry->h_length); //set ip
+    
+    //try and connect
+    if (connect(socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) 
+        return errorExit("Filed to connect to host", 1);
+
+    //create requiest payload with command
+    request = "(" + line_args->command;
+    
+    //add hash only on supported commands
+    if (line_args->command != "login" && line_args->command != "register") {
+        string hash = loadHash();
+        if (hash == ".") 
+            return errorExit("Not logged in", 1);
+        request += " " + hash;
+    }
+
+    //add arguments to payload (fetch is special)
+    if (line_args->command == "fetch") 
+        request += line_args->arguments[0];
+    else {
+        for (int i = 0; i < line_args->arguments.size(); i++) {
+            request += " \"" + line_args->arguments[i] + "\"";
+        }
+    }
+    request += ")";
+
+    cout << "request: " << request << endl;
+    
+    //write request to socket
+    wr = write(socket_fd, request.c_str(), request.length());
+    if (wr < 0) 
+        return errorExit("Failed writing to socket", 1);
+       
+    //read from socket
+    do {
+        wr = read(socket_fd, buffer, MAX_BUFFER_SIZE - 1);  //read
+        response += string(buffer);                         //save
+        memset(buffer, 0, MAX_BUFFER_SIZE);                 //clear
+    } while(wr > 0);
+    if (wr < 0) 
+        return errorExit("Failed reading from socket", 1);
+    close(socket_fd);   //close socket
+
+    cout << response << endl;
+    cout << response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)) << endl;
+
+    //TODO escape sequences
+    if (response.substr(1, 2) == "ok") {
+        cout << "SUCCESS: ";
+        vector<string> splits;
+
+        //command specific parsing
+        if (line_args->command == "login") {
+            splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\" \"");
+            if (saveHash(splits[1].substr(0, splits[1].length()) + "\""))
+                return errorExit("ERROR failed to save session hash", 1);
+            cout << splits[0].substr(0, splits[0].length() - 1) << endl;
+        }
+
+        else if (line_args->command == "fetch") {
+            splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\" \"");
+            cout << endl << endl;
+            cout << "From: " << splits[0].substr(1, splits[0].length() - 2) << endl;
+            cout << "Subject: " << splits[1].substr(1, splits[1].length() - 2) << endl;
+            cout << splits[2].substr(1, splits[2].length() - 2);
+        }
+
+        else if (line_args->command == "list") {
+            splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\\) \\(\\d");
+            cout << endl;
+            for (int i = 0; i < splits.size(); i++) {
+                cout << splits[i].substr(1, 1) << ":" << endl;
+                vector<string> single_msg = splitByDelimiter(splits[i].substr(2), "\" \"");
+                cout << "  From: " << single_msg[0].substr(1, single_msg[0].length() - 2) << endl;
+                cout << "  Subject: " << single_msg[1].substr(1, single_msg[1].length() - 2) << endl;
+            }
+        }
+
+        else {
+            cout << response.substr(OK_START + 1, response.length() - (OK_START + RESPONSE_END + 2)) << endl;
+        }
+    }
+    else if (response.substr(1, 3) == "err") {
+        cout << "ERROR: " << response.substr(ERR_START + 1, response.length() - (ERR_START + RESPONSE_END + 2)) << endl;
+    }
+    else
+        return errorExit("Unknown response", 1);
+
+    return 0;
+}
 
 //get arguments, commands and so on
 int parseArguments(int argc, char *argv[], LineArgs *line_args) {
@@ -168,25 +284,30 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
         //address parsing
         else if (argument == "--address" || argument == "-a") {
             //check if address parameter was already used
-            if (addr_set) return errorExit("client: only one instance of one option from (-a --address) is allowed", 1);
+            if (addr_set)
+                return errorExit("client: only one instance of one option from (-a --address) is allowed", 1);
             addr_set = true;    //address was set
 
             //do we have enough arguments
-            if (argc < i + 2) return errorExit("client: the \"" + argument + "\" option needs 1 argument, but 0 provided", 1);
+            if (argc < i + 2)
+                return errorExit("client: the \"" + argument + "\" option needs 1 argument, but 0 provided", 1);
             line_args->address = string(argv[i + 1]);  //save address
             i++;                            //skip one argument as we are using it as address
         }
 
         //port parsing (almost the same as address)
         else if (argument == "--port" || argument == "-p") {
-            if (port_set) return errorExit("client: only one instance of one option from (-p --port) is allowed", 1);
+            if (port_set)
+                return errorExit("client: only one instance of one option from (-p --port) is allowed", 1);
             port_set = true;
 
-            if (argc < i + 2) return errorExit("client: the \"" + argument + "\" option needs 1 argument, but 0 provided", 1);
+            if (argc < i + 2)
+                return errorExit("client: the \"" + argument + "\" option needs 1 argument, but 0 provided", 1);
             line_args->port = StringToNumber(string(argv[i + 1]));
 
             //return if port is not a number
-            if (line_args->port < 0) return errorExit("Port number is not a string", 1);
+            if (line_args->port < 0)
+                return errorExit("Port number is not a string", 1);
             i++;
         }
 
@@ -194,7 +315,8 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
         //register and login
         //TODO maybe some duplicate code
         else if (argument == "register" || argument == "login") {
-            if (argc - (i + 1) != 2) return errorExit(argument + " <username> <password>", 1);
+            if (argc - (i + 1) != 2)
+                return errorExit(argument + " <username> <password>", 1);
             line_args->command = argument;
             line_args->arguments.push_back(string(argv[i + 1]));
             line_args->arguments.push_back(base64Encode(string(argv[i + 2])));
@@ -203,14 +325,16 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
 
         //list
         else if (argument == "list" || argument == "logout") {
-            if (argc - (i + 1) != 0) return errorExit(argument, 1);
+            if (argc - (i + 1) != 0)
+                return errorExit(argument, 1);
             line_args->command = argument;
             break;
         }
 
         //send
         else if (argument == "send") {
-            if (argc - (i + 1) != 3) return errorExit(argument + " <recipient> <subject> <body>", 1);
+            if (argc - (i + 1) != 3)
+                return errorExit(argument + " <recipient> <subject> <body>", 1);
             line_args->command = argument;
             line_args->arguments.push_back(string(argv[i + 1]));
             line_args->arguments.push_back(string(argv[i + 2]));
@@ -220,7 +344,8 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
 
         //fetch
         else if (argument == "fetch") {
-            if (argc - (i + 1) != 1) return errorExit(argument + " <id>", 1);
+            if (argc - (i + 1) != 1)
+                return errorExit(argument + " <id>", 1);
             line_args->command = argument;
             line_args->arguments.push_back(string(argv[i + 1]));
             break;
@@ -228,11 +353,13 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
 
         //unknown command/switch
         else {
-            if (argument[0] == '-') return errorExit("client: unknown switch: " + argument, 1);
+            if (argument[0] == '-')
+                return errorExit("client: unknown switch: " + argument, 1);
             return errorExit("unknown command", 1);
         }
     }
 
+    //print help
     if (help) {
         cout << "usage: client [ <option> ... ] <command> [<args>] ...\n" << endl;
         cout << "<option> is one of\n" << endl;
@@ -256,7 +383,8 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
         return 0;
     }
 
-    if(line_args->command == "NONE") return errorExit("client: expects <command> [<args>] ... on the command line, given 0 arguments", 1);
+    if(line_args->command == "NONE")
+        return errorExit("client: expects <command> [<args>] ... on the command line, given 0 arguments", 1);
     
     //"fix" all arguments to make them protocol correct
     for (int i = 0; i < line_args->arguments.size(); i++) {
@@ -274,7 +402,8 @@ int main(int argc, char *argv[]) {
     /*----(argument parsing)----*/
     LineArgs line_args;
     int early_exit = parseArguments(argc, argv, &line_args);
-    if (early_exit >= 0) return early_exit;
+    if (early_exit >= 0)
+        return early_exit;
 
     cout << "port: " << line_args.port << endl;
     cout << "address: " << line_args.address << endl;
@@ -284,104 +413,5 @@ int main(int argc, char *argv[]) {
     }
     cout << endl;
 
-
-    //TODO move to won function
-    /*----(socket stuff)----*/
-    int socket_fd, wr;
-    struct sockaddr_in server;
-    struct hostent *host_entry;
-    char buffer[MAX_BUFFER_SIZE] = {0};
-    string request, response = "";
-    
-    socket_fd = socket(AF_INET, SOCK_STREAM, 0);    //create socket file descriptor
-    if (socket_fd < 0) return errorExit("ERROR opening socket", 1);
-    
-    host_entry = gethostbyname(line_args.address.c_str());  //get host (ip/hostname)
-    if (host_entry == NULL) return errorExit("ERROR, no such host", 1);
-    
-    server.sin_family = AF_INET;
-    server.sin_port = htons(line_args.port);                                    //set port
-    memcpy(&server.sin_addr, host_entry->h_addr_list[0], host_entry->h_length); //set ip
-    
-    //try and connect
-    if (connect(socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) return errorExit("Filed to connect to host", 1);
-
-    //create requiest payload with command
-    request = "(" + line_args.command;
-    
-    //add hash only on supported commands
-    if (line_args.command != "login" && line_args.command != "register") {
-        string hash = loadHash();
-        if (hash == ".") return errorExit("Not logged in", 1);
-        request += " " + hash;
-    }
-
-    //add arguments to payload (fetch is special)
-    if (line_args.command == "fetch") request += line_args.arguments[0];
-    else {
-        for (int i = 0; i < line_args.arguments.size(); i++) {
-            request += " \"" + line_args.arguments[i] + "\"";
-        }
-    }
-    request += ")";
-
-    cout << "request: " << request << endl;
-    
-    //write request to socket
-    wr = write(socket_fd, request.c_str(), request.length());
-    if (wr < 0) return errorExit("ERROR writing to socket", 2);
-       
-    //read from socket
-    do {
-        wr = read(socket_fd, buffer, MAX_BUFFER_SIZE - 1);  //read
-        response += string(buffer);                         //save
-        memset(buffer, 0, MAX_BUFFER_SIZE);                 //clear
-    } while(wr > 0);
-    if (wr < 0) return errorExit("ERROR reading from socket", 1);
-    close(socket_fd);   //close socket
-
-    cout << response << endl;
-    cout << response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)) << endl;
-
-    //TODO escape sequences
-    if (response.substr(1, 2) == "ok") {
-        cout << "SUCCESS: ";
-        vector<string> splits;
-
-        //command specific parsing
-        if (line_args.command == "login") {
-            splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\" \"");
-            if (saveHash(splits[1].substr(0, splits[1].length()) + "\"")) return errorExit("ERROR failed to save session hash", 1);
-            cout << splits[0].substr(0, splits[0].length() - 1) << endl;
-        }
-
-        else if (line_args.command == "fetch") {
-            splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\" \"");
-            cout << endl << endl;
-            cout << "From: " << splits[0].substr(1, splits[0].length() - 2) << endl;
-            cout << "Subject: " << splits[1].substr(1, splits[1].length() - 2) << endl;
-            cout << splits[2].substr(1, splits[2].length() - 2);
-        }
-
-        else if (line_args.command == "list") {
-            splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\\) \\(\\d");
-            cout << endl;
-            for (int i = 0; i < splits.size(); i++) {
-                cout << splits[i].substr(1, 1) << ":" << endl;
-                vector<string> single_msg = splitByDelimiter(splits[i].substr(2), "\" \"");
-                cout << "  From: " << single_msg[0].substr(1, single_msg[0].length() - 2) << endl;
-                cout << "  Subject: " << single_msg[1].substr(1, single_msg[1].length() - 2) << endl;
-            }
-        }
-
-        else {
-            cout << response.substr(OK_START + 1, response.length() - (OK_START + RESPONSE_END + 2)) << endl;
-        }
-    }
-    else if (response.substr(1, 3) == "err") {
-        cout << "ERROR: " << response.substr(ERR_START + 1, response.length() - (ERR_START + RESPONSE_END + 2)) << endl;
-    }
-    else return errorExit("Unknown response", 1);
-
-    return 0;
+    return sendAndReceive(&line_args);
 }

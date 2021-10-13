@@ -9,6 +9,7 @@
 #include <vector>
 #include <algorithm>
 #include <regex>
+#include <bitset>
 
 #include <sys/types.h>
 #include <sys/socket.h>
@@ -45,14 +46,35 @@ int errorExit(string msg, int err_code) {
 }
 
 
-//TODO base64
-//string base64Encode(string s) {
-//
-//}
-//string base64Decode(string s) {
-//
-//}
+//TODO comments
+string base64Encode(string s) {
+    cout << "String to decode: " << s << endl;
+    unsigned char base64_table[65] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    int len = s.length();
+    string encoded(4 * (len + 2) / 3, '='); //fill string with padding
+    int j = 0;
+    int p = len % 3;
+    int last = len - p;
 
+    for (size_t i = 0; i < last; i += 3) {
+        int n = int(s[i]) << 16 | int(s[i + 1]) << 8 | s[i + 2];
+        encoded[j++] = base64_table[n >> 18];
+        encoded[j++] = base64_table[n >> 12 & 0x3F];
+        encoded[j++] = base64_table[n >> 6  & 0x3F];
+        encoded[j++] = base64_table[n       & 0x3F];
+    }
+
+    //padding is required
+    if (p) {
+        int n = --p ? int(s[last]) << 8 | s[last + 1] : s[last];
+        encoded[j++] = base64_table[p ? n >> 10 & 0x3F  : n >> 2];
+        encoded[j++] = base64_table[p ? n >> 4  & 0x03F : n << 4 & 0x3F];
+        encoded[j++] = p ? base64_table[n << 2  & 0x3F] : '=';
+    }
+
+    cout << encoded << endl;
+    return encoded;
+}
 
 /*----(file operations)----*/
 //TODO save and load session hash
@@ -94,7 +116,7 @@ vector<string> splitByDelimiter(string s, string rgx_exp) {
 int StringToNumber(string s) {
     //check if all chars are numbers
     for (int i = 0; i < s.length(); i++) {
-        if (!isdigit(s.at(i))) return -1;
+        if (!isdigit(s[i])) return -1;
     }
     return stoi(s);
 }
@@ -175,7 +197,7 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
             if (argc - (i + 1) != 2) return errorExit(argument + " <username> <password>", 1);
             line_args->command = argument;
             line_args->arguments.push_back(string(argv[i + 1]));
-            line_args->arguments.push_back(string(argv[i + 2]));
+            line_args->arguments.push_back(base64Encode(string(argv[i + 2])));
             break;
         }
 
@@ -206,7 +228,7 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
 
         //unknown command/switch
         else {
-            if (argument.at(0) == '-') return errorExit("client: unknown switch: " + argument, 1);
+            if (argument[0] == '-') return errorExit("client: unknown switch: " + argument, 1);
             return errorExit("unknown command", 1);
         }
     }
@@ -238,9 +260,9 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
     
     //"fix" all arguments to make them protocol correct
     for (int i = 0; i < line_args->arguments.size(); i++) {
-        line_args->arguments.at(i) = trim(line_args->arguments.at(i));  //trim spaces for later easier response parsing
-        line_args->arguments.at(i) = replaceInString(line_args->arguments.at(i), "\\", "\\\\"); //escape '\'
-        line_args->arguments.at(i) = replaceInString(line_args->arguments.at(i), "\"", "\\\""); //escape '"'
+        line_args->arguments[i] = trim(line_args->arguments[i]);  //trim spaces for later easier response parsing
+        line_args->arguments[i] = replaceInString(line_args->arguments[i], "\\", "\\\\"); //escape '\'
+        line_args->arguments[i] = replaceInString(line_args->arguments[i], "\"", "\\\""); //escape '"'
     }
     return -1;
 }
@@ -258,7 +280,7 @@ int main(int argc, char *argv[]) {
     cout << "address: " << line_args.address << endl;
     cout << "command: " << line_args.command << " ";
     for (int i = 0; i < line_args.arguments.size(); i++) {
-        cout << line_args.arguments.at(i) << " ";
+        cout << line_args.arguments[i] << " ";
     }
     cout << endl;
 
@@ -295,10 +317,10 @@ int main(int argc, char *argv[]) {
     }
 
     //add arguments to payload (fetch is special)
-    if (line_args.command == "fetch") request += line_args.arguments.at(0);
+    if (line_args.command == "fetch") request += line_args.arguments[0];
     else {
         for (int i = 0; i < line_args.arguments.size(); i++) {
-            request += " \"" + line_args.arguments.at(i) + "\"";
+            request += " \"" + line_args.arguments[i] + "\"";
         }
     }
     request += ")";
@@ -326,13 +348,14 @@ int main(int argc, char *argv[]) {
         cout << "SUCCESS: ";
         vector<string> splits;
 
+        //command specific parsing
         if (line_args.command == "login") {
             splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\" \"");
             if (saveHash(splits[1].substr(0, splits[1].length()) + "\"")) return errorExit("ERROR failed to save session hash", 1);
             cout << splits[0].substr(0, splits[0].length() - 1) << endl;
         }
 
-        if (line_args.command == "fetch") {
+        else if (line_args.command == "fetch") {
             splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\" \"");
             cout << endl << endl;
             cout << "From: " << splits[0].substr(1, splits[0].length() - 2) << endl;
@@ -340,19 +363,20 @@ int main(int argc, char *argv[]) {
             cout << splits[2].substr(1, splits[2].length() - 2);
         }
 
-        if (line_args.command == "list") {
+        else if (line_args.command == "list") {
             splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\\) \\(\\d");
             cout << endl;
             for (int i = 0; i < splits.size(); i++) {
                 cout << splits[i].substr(1, 1) << ":" << endl;
-                //cout << splits[i] << endl;
                 vector<string> single_msg = splitByDelimiter(splits[i].substr(2), "\" \"");
                 cout << "  From: " << single_msg[0].substr(1, single_msg[0].length() - 2) << endl;
                 cout << "  Subject: " << single_msg[1].substr(1, single_msg[1].length() - 2) << endl;
             }
         }
 
-        else cout << response.substr(OK_START + 1, response.length() - (OK_START + RESPONSE_END + 2)) << endl;
+        else {
+            cout << response.substr(OK_START + 1, response.length() - (OK_START + RESPONSE_END + 2)) << endl;
+        }
     }
     else if (response.substr(1, 3) == "err") {
         cout << "ERROR: " << response.substr(ERR_START + 1, response.length() - (ERR_START + RESPONSE_END + 2)) << endl;

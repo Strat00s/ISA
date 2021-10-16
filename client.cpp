@@ -123,13 +123,13 @@ int StringToNumber(string s) {
 
 //replace x with y in s
 string replaceInString(string s, string x, string y) {
-    //cout << s << " > ";
+    cout << s << " > ";
     int pos = 0;
     while ((pos = s.find(x, pos)) != string::npos) {
         s.replace(pos, x.length(), y);
         pos = pos + y.length();  //skip the newly escaped character
     }
-    //cout << s << endl;
+    cout << s << endl;
     return s;
 }
 
@@ -196,8 +196,8 @@ int sendAndReceive(LineArgs *line_args) {
         return errorExit("Failed reading from socket", 1);
     close(socket_fd);   //close socket
 
-    //cout << response << endl;
-    //cout << response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)) << endl;
+    cout << response << endl;
+    cout << response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)) << endl;
 
 
     //TODO comments
@@ -206,9 +206,11 @@ int sendAndReceive(LineArgs *line_args) {
     //escape everything
     for (int i = 0; i < splits.size(); i++){
         splits[i] = splits[i].substr(1, splits[i].length() - 2);    //remove quotes, as they are no longer neede and would only cause trouble
-        splits[i] = replaceInString(splits[i], "\\\\", "\\");       //un-escape '\'
         splits[i] = replaceInString(splits[i], "\\n", "\n");        //un-escape '\n'
+        splits[i] = replaceInString(splits[i], "\\\\", "\\");       //un-escape '\'
+        //splits[i] = replaceInString(splits[i], "\\n", "\n");        //un-escape '\n'
         splits[i] = replaceInString(splits[i], "\\\"", "\"");       //un-escape '"'
+        splits[i] = replaceInString(splits[i], "\\\n", "\\n");        //un-escape '\n'
     }
 
     if (response.substr(1, 2) == "ok") {
@@ -237,10 +239,10 @@ int sendAndReceive(LineArgs *line_args) {
 
         else if (line_args->command == "list") {
             cout << endl;
-            for (int i = 0; i < splits.size() / 2; i++) {
-                cout << i + 1 << ":" << endl;
-                cout << "  From: " << splits[0] << endl;
-                cout << "  Subject: " << splits[1] << endl;
+            for (int i = 0; i < splits.size(); i += 2) {
+                cout << i / 2 + 1 << ":" << endl;
+                cout << "  From: " << splits[i] << endl;
+                cout << "  Subject: " << splits[i+1] << endl;
             }
         }
 

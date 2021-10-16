@@ -48,13 +48,13 @@ int errorExit(string msg, int err_code) {
 
 //TODO comments
 string base64Encode(string s) {
-    cout << "String to decode: " << s << endl;
+    //cout << "String to decode: " << s << endl;
     unsigned char base64_table[65] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
     int len = s.length();
-    string encoded(4 * (len + 2) / 3, '='); //fill string with padding
     int j = 0;
     int p = len % 3;
     int last = len - p;
+    string encoded(4 * (len + 2) / 3, '='); //fill string with padding
 
     for (size_t i = 0; i < last; i += 3) {
         int n = int(s[i]) << 16 | int(s[i + 1]) << 8 | s[i + 2];
@@ -72,7 +72,7 @@ string base64Encode(string s) {
         encoded[j++] = p ? base64_table[n << 2  & 0x3F] : '=';
     }
 
-    cout << encoded << endl;
+    //cout << encoded << endl;
     return encoded;
 }
 
@@ -104,13 +104,10 @@ vector<string> splitByDelimiter(string s, string rgx_exp) {
     vector<string> splits;
     int old_index = 0;
     regex rgx(rgx_exp);
-    
-    //iterate and split string on index
-    for (auto it = sregex_iterator(s.begin(), s.end(), rgx); it != sregex_iterator(); it++) {
-        splits.push_back(s.substr(old_index + 1, it->position()  - old_index));
-        old_index = it->position() + 1; //move to next one
-    }
-    splits.push_back(s.substr(old_index + 1, s.length() - old_index - 2));
+
+    //iterate and get everything in quotes
+    for (auto it = sregex_iterator(s.begin(), s.end(), rgx); it != sregex_iterator(); it++) 
+        splits.push_back(it->str());
     return splits;
 }
 
@@ -124,34 +121,15 @@ int StringToNumber(string s) {
     return stoi(s);
 }
 
-//TODO comments
-string ltrim(string s) {
-    size_t start = s.find_first_not_of(" \n\r\t\f\v");
-    if (start == string::npos)
-        return s;
-    return s.substr(start);
-}
- 
-string rtrim(string s) {
-    size_t end = s.find_last_not_of(" \n\r\t\f\v");
-    if (end == string::npos)
-        return s;
-    return s.substr(0, end + 1);
-}
- 
-string trim(string s) {
-    s = ltrim(s);
-    s = rtrim(s);
-    return s;
-}
-
 //replace x with y in s
 string replaceInString(string s, string x, string y) {
+    //cout << s << " > ";
     int pos = 0;
     while ((pos = s.find(x, pos)) != string::npos) {
         s.replace(pos, x.length(), y);
         pos = pos + y.length();  //skip the newly escaped character
     }
+    //cout << s << endl;
     return s;
 }
 
@@ -178,9 +156,9 @@ int sendAndReceive(LineArgs *line_args) {
     
     //try and connect
     if (connect(socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) 
-        return errorExit("Filed to connect to host", 1);
+        return errorExit("Failed to connect to host", 1);
 
-    //create requiest payload with command
+    //create request payload with command
     request = "(" + line_args->command;
     
     //add hash only on supported commands
@@ -201,7 +179,7 @@ int sendAndReceive(LineArgs *line_args) {
     }
     request += ")";
 
-    cout << "request: " << request << endl;
+    //cout << "request: " << request << endl;
     
     //write request to socket
     wr = write(socket_fd, request.c_str(), request.length());
@@ -218,52 +196,60 @@ int sendAndReceive(LineArgs *line_args) {
         return errorExit("Failed reading from socket", 1);
     close(socket_fd);   //close socket
 
-    cout << response << endl;
-    cout << response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)) << endl;
+    //cout << response << endl;
+    //cout << response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)) << endl;
 
+
+    //TODO comments
+    vector<string> splits = splitByDelimiter(response, R"(\"(\\.|[^\"])*\")");  //split response by regex
+
+    //escape everything
+    for (int i = 0; i < splits.size(); i++){
+        splits[i] = splits[i].substr(1, splits[i].length() - 2);    //remove quotes, as they are no longer neede and would only cause trouble
+        splits[i] = replaceInString(splits[i], "\\\\", "\\");       //un-escape '\'
+        splits[i] = replaceInString(splits[i], "\\n", "\n");        //un-escape '\n'
+        splits[i] = replaceInString(splits[i], "\\\"", "\"");       //un-escape '"'
+    }
 
     if (response.substr(1, 2) == "ok") {
         cout << "SUCCESS: ";
-        response = replaceInString(response, "\\\\", "\\"); //un-escape '\'
-        response = replaceInString(response, "\\n", "\n");  //un-escape '\n'
-        response = replaceInString(response, "\\\"", "\""); //un-escape '"'
-        vector<string> splits;
+
+        if (line_args->command == "logout") {
+            if (remove("login-token"))    //remove token file
+                return errorExit("ERROR failed to remove login token", 1);
+            cout << splits[0] << endl;
+        }
 
         //command specific parsing
-        if (line_args->command == "login") {
-            splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\" \"");
-            if (saveHash(splits[1].substr(0, splits[1].length()) + "\""))
-                return errorExit("ERROR failed to save session hash", 1);
-            cout << splits[0].substr(0, splits[0].length() - 1) << endl;
+        else if (line_args->command == "login") {
+            if (saveHash("\"" + splits[1] + "\""))
+                return errorExit("ERROR failed to save login token", 1);
+            cout << splits[0] << endl;
         }
 
         else if (line_args->command == "fetch") {
-            splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\" \"");
             cout << endl << endl;
-            cout << "From: " << splits[0].substr(1, splits[0].length() - 2) << endl;
-            cout << "Subject: " << splits[1].substr(1, splits[1].length() - 2) << endl;
+            cout << "From: " << splits[0] << endl;
+            cout << "Subject: " << splits[1] << endl;
             cout << endl;
-            cout << splits[2].substr(1, splits[2].length() - 2);
+            cout << splits[2];
         }
 
         else if (line_args->command == "list") {
-            splits = splitByDelimiter(response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)), "\\) \\(\\d");
             cout << endl;
-            for (int i = 0; i < splits.size(); i++) {
-                cout << splits[i].substr(1, 1) << ":" << endl;
-                vector<string> single_msg = splitByDelimiter(splits[i].substr(2), "\" \"");
-                cout << "  From: " << single_msg[0].substr(1, single_msg[0].length() - 2) << endl;
-                cout << "  Subject: " << single_msg[1].substr(1, single_msg[1].length() - 2) << endl;
+            for (int i = 0; i < splits.size() / 2; i++) {
+                cout << i + 1 << ":" << endl;
+                cout << "  From: " << splits[0] << endl;
+                cout << "  Subject: " << splits[1] << endl;
             }
         }
 
-        else {
-            cout << response.substr(OK_START + 1, response.length() - (OK_START + RESPONSE_END + 2)) << endl;
-        }
+        //payloads without splits
+        else
+            cout << splits[0] << endl;
     }
-    else if (response.substr(1, 3) == "err") {
-        cout << "ERROR: " << response.substr(ERR_START + 1, response.length() - (ERR_START + RESPONSE_END + 2)) << endl;
-    }
+    else if (response.substr(1, 3) == "err")
+        cout << "ERROR: " << splits[0] << endl;
     else
         return errorExit("Unknown response", 1);
 
@@ -323,6 +309,7 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
                 return errorExit(argument + " <username> <password>", 1);
             line_args->command = argument;
             line_args->arguments.push_back(string(argv[i + 1]));
+            cout << string(argv[i + 1]) << endl;
             line_args->arguments.push_back(base64Encode(string(argv[i + 2])));
             break;
         }
@@ -392,9 +379,10 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
     
     //"fix" all arguments to make them protocol correct
     for (int i = 0; i < line_args->arguments.size(); i++) {
-        line_args->arguments[i] = trim(line_args->arguments[i]);  //trim spaces for later easier response parsing
+        //line_args->arguments[i] = trim(line_args->arguments[i]);  //trim spaces for later easier response parsing
         line_args->arguments[i] = replaceInString(line_args->arguments[i], "\\", "\\\\"); //escape '\'
         line_args->arguments[i] = replaceInString(line_args->arguments[i], "\"", "\\\""); //escape '"'
+        //'\n' is escaped automatically???
     }
     return -1;
 }
@@ -409,13 +397,13 @@ int main(int argc, char *argv[]) {
     if (early_exit >= 0)
         return early_exit;
 
-    cout << "port: " << line_args.port << endl;
-    cout << "address: " << line_args.address << endl;
-    cout << "command: " << line_args.command << " ";
-    for (int i = 0; i < line_args.arguments.size(); i++) {
-        cout << line_args.arguments[i] << " ";
-    }
-    cout << endl;
+    //cout << "port: " << line_args.port << endl;
+    //cout << "address: " << line_args.address << endl;
+    //cout << "command: " << line_args.command << " ";
+    //for (int i = 0; i < line_args.arguments.size(); i++) {
+    //    cout << line_args.arguments[i] << " ";
+    //}
+    //cout << endl;
 
     return sendAndReceive(&line_args);
 }

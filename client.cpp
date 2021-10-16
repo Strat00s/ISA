@@ -196,8 +196,8 @@ int sendAndReceive(LineArgs *line_args) {
         return errorExit("Failed reading from socket", 1);
     close(socket_fd);   //close socket
 
-    cout << response << endl;
-    cout << response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)) << endl;
+    //cout << response << endl;
+    //cout << response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)) << endl;
 
 
     //TODO comments
@@ -206,11 +206,17 @@ int sendAndReceive(LineArgs *line_args) {
     //escape everything
     for (int i = 0; i < splits.size(); i++){
         splits[i] = splits[i].substr(1, splits[i].length() - 2);    //remove quotes, as they are no longer neede and would only cause trouble
-        splits[i] = replaceInString(splits[i], "\\n", "\n");        //un-escape '\n'
-        splits[i] = replaceInString(splits[i], "\\\\", "\\");       //un-escape '\'
-        //splits[i] = replaceInString(splits[i], "\\n", "\n");        //un-escape '\n'
-        splits[i] = replaceInString(splits[i], "\\\"", "\"");       //un-escape '"'
-        splits[i] = replaceInString(splits[i], "\\\n", "\\n");        //un-escape '\n'
+        for (int j = 0; j < splits[i].length(); j++) {
+            //un-escape '\'
+            if (splits[i].substr(j, 2) == "\\\\")
+                splits[i].replace(j, 2, "\\");
+            //un-escape '\n'
+            else if (splits[i].substr(j, 2) == "\\n")
+                splits[i].replace(j, 2, "\n");
+            //un-escape '"'
+            else if (splits[i].substr(j, 2) == "\\\"")
+                splits[i].replace(j, 2, "\"");
+        }
     }
 
     if (response.substr(1, 2) == "ok") {

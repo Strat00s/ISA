@@ -102,12 +102,43 @@ string loadHash() {
 //split string by regex delimiter
 vector<string> splitByDelimiter(string s, string rgx_exp) {
     vector<string> splits;
-    int old_index = 0;
-    regex rgx(rgx_exp);
 
+    /*  old regex implementation
+    regex rgx(rgx_exp, regex::optimize);
     //iterate and get everything in quotes
     for (auto it = sregex_iterator(s.begin(), s.end(), rgx); it != sregex_iterator(); it++) 
         splits.push_back(it->str());
+    */
+    
+    int start_index = -1;
+    int end_index = -1;
+    for (int i = 0; i < s.length(); i++) {
+        cout << i << " | " << s.substr(i, 2) << " | " << s.substr(i, 1);
+        //skip slashes
+        if (s.substr(i, 2) == "\\\\" || s.substr(i, 2) == "\\\"")
+            i++;
+        //check for free quotes
+        else if (s.substr(i, 1) == "\"") {
+            if (end_index == -1 && start_index != -1) {
+                end_index = i;
+                cout << " < end";
+            }
+            if (start_index == -1) {
+                start_index = i;
+                cout << " < start";
+            }
+        }
+        cout << endl;
+        //once both start and end quotes are acquired, get the substring
+        if (start_index != -1 && end_index != -1) {
+            cout << "Got string (" << start_index << ":" << end_index << "):" << endl;
+            cout << "  '" << s.substr(start_index, end_index - start_index + 1) << "'" << endl;
+            splits.push_back(s.substr(start_index, end_index - start_index + 1));
+            start_index = -1;
+            end_index = -1;
+        }
+    }
+
     return splits;
 }
 
@@ -203,9 +234,12 @@ int sendAndReceive(LineArgs *line_args) {
     //TODO comments
     vector<string> splits = splitByDelimiter(response, R"(\"(\\.|[^\"])*\")");  //split response by regex
 
+    //TODO own function?
     //escape everything
     for (int i = 0; i < splits.size(); i++){
+        cout << splits[i] << " > ";
         splits[i] = splits[i].substr(1, splits[i].length() - 2);    //remove quotes, as they are no longer neede and would only cause trouble
+        cout << splits[i] << " > ";
         for (int j = 0; j < splits[i].length(); j++) {
             //un-escape '\'
             if (splits[i].substr(j, 2) == "\\\\")
@@ -217,6 +251,7 @@ int sendAndReceive(LineArgs *line_args) {
             else if (splits[i].substr(j, 2) == "\\\"")
                 splits[i].replace(j, 2, "\"");
         }
+        cout << splits[i] << endl; 
     }
 
     if (response.substr(1, 2) == "ok") {

@@ -1,32 +1,21 @@
-#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <getopt.h>
 #include <string.h>
 #include <signal.h>
 #include <iostream>
 #include <fstream>
 #include <vector>
-#include <algorithm>
-#include <regex>
-#include <bitset>
-
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 #include <netdb.h>
-#include <arpa/inet.h>
-
-#define DEFAULT_ADDRESS "localhost"
-#define DEFAULT_PORT 32323
-#define MAX_BUFFER_SIZE 256
-#define OK_START 4      //start of payload from ok response
-#define ERR_START 5     //      -- || --        err response
-#define RESPONSE_END 1  //')'
-#define SESSION_HASH_FILE "login-token"
 
 using namespace std;
 
+/*----(macros)----*/
+#define DEFAULT_ADDRESS "localhost"
+#define DEFAULT_PORT 32323
+#define MAX_BUFFER_SIZE 256
+#define SESSION_HASH_FILE "login-token"
+
+/*----(structs)----*/
 struct LineArgs{
     string address = DEFAULT_ADDRESS;
     int port = DEFAULT_PORT;
@@ -35,6 +24,7 @@ struct LineArgs{
 };
 
 
+/*----(Exit handeling)----*/
 void signalCallback(int signal) {
     cerr << "Process interrupted by the user" << endl;
     exit(1);
@@ -46,7 +36,8 @@ int errorExit(string msg, int err_code) {
 }
 
 
-//TODO comments
+/*----(base 64)----*/
+//only encoding is needed
 string base64Encode(string s) {
     unsigned char base64_table[65] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -85,6 +76,7 @@ string base64Encode(string s) {
     return encoded;
 }
 
+
 /*----(file operations)----*/
 //save hash to file
 int saveHash(string hash) {
@@ -109,30 +101,24 @@ string loadHash() {
 
 /*----(String operations)----*/
 //split string by regex delimiter
-vector<string> splitByDelimiter(string s, string rgx_exp) {
+vector<string> splitByQuotes(string s) {
     vector<string> splits;
-    
     int start_index = -1;
+
+    //loop string and search for string in quotes
     for (int i = 0; i < s.length(); i++) {
-        cout << i << " | " << s.substr(i, 2) << " | " << s.substr(i, 1);
         //skip slashes
         if (s.substr(i, 2) == "\\\\" || s.substr(i, 2) == "\\\"")
             i++;
-        //check for free quotes
+        //if quote was found, set it either as start or end of the string
         else if (s.substr(i, 1) == "\"") {
             if (start_index != -1) {
-                cout << " < end" << endl;
-                cout << "Got string (" << start_index << ":" << i << "):" << endl;
-                cout << "  '" << s.substr(start_index, i - start_index + 1) << "'" << endl;
                 splits.push_back(s.substr(start_index, i - start_index + 1));
                 start_index = -1;
             }
-            else {
+            else
                 start_index = i;
-                cout << " < start";
-            }
         }
-        cout << endl;
     }
 
     return splits;
@@ -161,38 +147,40 @@ string replaceInString(string s, string x, string y) {
 }
 
 
-//TODO rewamp
-//TODO maybe add ipv6?
-int sendAndReceive(LineArgs *line_args) {
-    int socket_fd, wr;
+/*----(networking)----*/
+int setupAndconnect(int *socket_fd, string address, int port) {
     struct sockaddr_in server;
     struct hostent *host_entry;
-    char buffer[MAX_BUFFER_SIZE] = {0};
-    string request, response = "";
     
     //create socket file descriptor
-    socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (socket_fd < 0) 
+    *socket_fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (*socket_fd < 0) 
         return errorExit("Failed to open socket", 1);
     
+    //TODO ipv6 via gethostinfo?
     //get host (ip/hostname)
-    host_entry = gethostbyname(line_args->address.c_str());
+    host_entry = gethostbyname(address.c_str());
     if (host_entry == NULL) 
-        return errorExit("Err: no such host", 1);
+        return errorExit("No such host '" + address + "'", 1);
     
     server.sin_family = AF_INET;                                                //set address family
-    server.sin_port = htons(line_args->port);                                   //set port
+    server.sin_port = htons(port);                                   //set port
     memcpy(&server.sin_addr, host_entry->h_addr_list[0], host_entry->h_length); //set ip
     
     //try and connect
-    if (connect(socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) 
+    if (connect(*socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) 
         return errorExit("Failed to connect to host", 1);
+    
+    return 0;
+}
 
-    //create request payload with command
-    request = "(" + line_args->command;
+int mySend(int socket_fd, string command, vector<string> arguments) {
+    string request; //request payload
+
+    request = "(" + command; //add command
     
     //add hash only on supported commands
-    if (line_args->command != "login" && line_args->command != "register") {
+    if (command != "login" && command != "register") {
         string hash = loadHash();
         if (hash == ".") 
             return errorExit("Not logged in", 1);
@@ -200,41 +188,46 @@ int sendAndReceive(LineArgs *line_args) {
     }
 
     //add arguments to payload (fetch is special)
-    if (line_args->command == "fetch") 
-        request += line_args->arguments[0];
+    if (command == "fetch") 
+        request += arguments[0];
     else {
-        for (int i = 0; i < line_args->arguments.size(); i++) {
-            request += " \"" + line_args->arguments[i] + "\"";
-        }
+        for (int i = 0; i < arguments.size(); i++)
+            request += " \"" + arguments[i] + "\"";
     }
     request += ")";
 
-    //cout << "request: " << request << endl;
+    cout << "request: " << request << endl;
     
     //write request to socket
-    wr = write(socket_fd, request.c_str(), request.length());
-    if (wr < 0) 
+    if (write(socket_fd, request.c_str(), request.length()) < 0) 
         return errorExit("Failed writing to socket", 1);
-       
+
+    return 0;
+}
+
+int myReceive(int socket_fd, string *response) {
+    int rc;
+    char buffer[MAX_BUFFER_SIZE] = {0};
     //read from socket
     do {
-        wr = read(socket_fd, buffer, MAX_BUFFER_SIZE - 1);  //read
-        response += string(buffer);                         //save
+        rc = read(socket_fd, buffer, MAX_BUFFER_SIZE - 1);  //read
+        *response += string(buffer);                         //save
         memset(buffer, 0, MAX_BUFFER_SIZE);                 //clear
-    } while(wr > 0);
-    if (wr < 0) 
+    } while(rc > 0);
+
+    if (rc < 0) 
         return errorExit("Failed reading from socket", 1);
     close(socket_fd);   //close socket
 
-    //cout << response << endl;
-    //cout << response.substr(OK_START, response.length() - (OK_START + RESPONSE_END)) << endl;
+    return 0;
+}
 
 
-    //TODO comments
-    vector<string> splits = splitByDelimiter(response, R"(\"(\\.|[^\"])*\")");  //split response by regex
+/*----(response parsing)----*/
+int printResponse(string response, string command) {
+    vector<string> splits = splitByQuotes(response);  //split response by regex
 
-    //TODO own function?
-    //escape everything
+    //un-escape everything
     for (int i = 0; i < splits.size(); i++){
         cout << splits[i] << " > ";
         splits[i] = splits[i].substr(1, splits[i].length() - 2);    //remove quotes, as they are no longer neede and would only cause trouble
@@ -256,20 +249,20 @@ int sendAndReceive(LineArgs *line_args) {
     if (response.substr(1, 2) == "ok") {
         cout << "SUCCESS: ";
 
-        if (line_args->command == "logout") {
+        if (command == "logout") {
             if (remove("login-token"))    //remove token file
                 return errorExit("ERROR failed to remove login token", 1);
             cout << splits[0] << endl;
         }
 
         //command specific parsing
-        else if (line_args->command == "login") {
+        else if (command == "login") {
             if (saveHash("\"" + splits[1] + "\""))
                 return errorExit("ERROR failed to save login token", 1);
             cout << splits[0] << endl;
         }
 
-        else if (line_args->command == "fetch") {
+        else if (command == "fetch") {
             cout << endl << endl;
             cout << "From: " << splits[0] << endl;
             cout << "Subject: " << splits[1] << endl;
@@ -277,7 +270,7 @@ int sendAndReceive(LineArgs *line_args) {
             cout << splits[2];
         }
 
-        else if (line_args->command == "list") {
+        else if (command == "list") {
             cout << endl;
             for (int i = 0; i < splits.size(); i += 2) {
                 cout << i / 2 + 1 << ":" << endl;
@@ -298,8 +291,9 @@ int sendAndReceive(LineArgs *line_args) {
     return 0;
 }
 
-//TODO rewamp
+
 //get arguments, commands and so on
+/*----(argument parsing)----*/
 int parseArguments(int argc, char *argv[], LineArgs *line_args) {
     bool help = false;
     bool addr_set = false;
@@ -313,7 +307,6 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
         //help parsing
         if (argument == "--help" || argument == "-h") help = true;
 
-        //TODO address and port have some duplicate code
         //address parsing
         else if (argument == "--address" || argument == "-a") {
             //check if address parameter was already used
@@ -346,7 +339,6 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
 
         //command and argument "parsing"
         //register and login
-        //TODO maybe some duplicate code
         else if (argument == "register" || argument == "login") {
             if (argc - (i + 1) != 2)
                 return errorExit(argument + " <username> <password>", 1);
@@ -402,9 +394,7 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
         cout << "  -p <port>, --port <port>" << endl;
         cout << "     Server port to connect to" << endl;
         cout << "  --help, -h" << endl;
-        cout << "     Show this help" << endl;
-        cout << "  --" << endl;
-        cout << "     Do not treat any remaining argument as a switch (at this level)\n" << endl;
+        cout << "     Show this help" << endl << endl;
         cout << " Supported commands:" << endl;
         cout << "   register <username> <password>" << endl;
         cout << "   login <username> <password>" << endl;
@@ -427,28 +417,30 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
 }
 
 
+/*----(main)----*/
 int main(int argc, char *argv[]) {
     signal (SIGINT, signalCallback);
-
-    /*----(argument parsing)----*/
     LineArgs line_args;
-    int rc = parseArguments(argc, argv, &line_args);
-    if (rc >= 0)
+    int rc, socket_fd;
+    string response;
+
+    //get arguments
+    if ((rc = parseArguments(argc, argv, &line_args)) >= 0)
         return rc;
 
-    //rc = send(%line_args)
-    //if (rc >= 0)
-    //    return rc;
+    //connect
+    if ((rc = setupAndconnect(&socket_fd, line_args.address, line_args.port)) > 0)
+        return rc;
+    
+    //send request
+    if ((rc = mySend(socket_fd, line_args.command, line_args.arguments)) > 0)
+        return rc;
 
-    //return receive(&line_args)
-
-    //cout << "port: " << line_args.port << endl;
-    //cout << "address: " << line_args.address << endl;
-    //cout << "command: " << line_args.command << " ";
-    //for (int i = 0; i < line_args.arguments.size(); i++) {
-    //    cout << line_args.arguments[i] << " ";
-    //}
-    //cout << endl;
-
-    return sendAndReceive(&line_args);
+    //get response
+    if ((rc = myReceive(socket_fd, &response)) > 0)
+        return rc;
+    
+    //print response
+    if ((rc = printResponse(response, line_args.command)) > 0)
+        return rc;
 }

@@ -51,7 +51,7 @@ Payload_entry.fields = {Argument_cnt, Argument_session_hash, Argument_recipient,
     --list:                        3 bracket pairs, x*2 strings -> messages
     --list empty:                  2 bracket pairs, 0 strings   -> no message
     --login:                       1 bracket pair,  2 strings   -> login
-function SplitByQuotes(s)
+function SplitByQuotes(s, pinfo)
     local splits = {} --splits = {{start, end, len}, {start, end, len}, ...}
     local start_index = -1
     local bracket_cnt = 0
@@ -67,20 +67,19 @@ function SplitByQuotes(s)
         --count brackets to find out if the entire message was received
         if (s:sub(i, i) == "(" and start_index == -1) then
             bracket_cnt = bracket_cnt + 1
-            print("Got opening bracket (" .. bracket_cnt .. ")")
         end
         if (s:sub(i, i) == ")" and start_index == -1) then
             bracket_cnt = bracket_cnt - 1
-            print("Got closing bracket (" .. bracket_cnt .. ")")
         end
 
         --exit or request more data
         if (i >= #s) then
-            print("End reached")
+            
+            --request another segment once end of the current buffer is reached and we still dont have the entire response
             if (bracket_cnt ~= 0) then
-                print("Bracket count is not zero -> this is not the entire message")
+                pinfo.desegment_len = DESEGMENT_ONE_MORE_SEGMENT
+                return -1, splits
             else
-                print("All brackets were paired -> we got the entire message")
                 --response payload determination
                 if (max_brackets == 1 and #splits == 1)     then response_type = 0 end --raw payload
                 if (max_brackets == 2 and #splits == 3)     then response_type = 1 end --message
@@ -92,7 +91,6 @@ function SplitByQuotes(s)
             break
         end
 
-        print(i .. " | " .. s:sub(i, i + 1) .. " | " .. s:sub(i, i))
         --skip slashes and escaped quotes
         if (s:sub(i, i + 1) == "\\\\" or s:sub(i, i + 1) == "\\\"") then
             i = i + 1   --increment i to skip the second character
@@ -100,28 +98,19 @@ function SplitByQuotes(s)
         --check for quotes
         elseif (s:sub(i, i) == "\"") then
             if (start_index ~= -1) then
-                print(" ^ end")
-                print("Got string (" .. start_index .. ":" .. i .. "):")
-                print("  '" .. s:sub(start_index, i) .. "'")
                 table.insert(splits, {start_index, i, i - start_index + 1})
                 start_index = -1;
             else
                 start_index = i;
-                print(" ^ start")
             end
         end
 
         i = i + 1   --increment i
     end
 
-
-    for i = 1, #splits do
-        print("Item " .. i .. " data :")
-        print("    start: " .. splits[i][1] .. " | end: " .. splits[i][2] .. " | len: " .. splits[i][3])
-    end
-
     return response_type, splits
 end
+
 
 --main function for dissecting
 function Isa_entry.dissector(buffer, pinfo, tree)
@@ -139,8 +128,9 @@ function Isa_entry.dissector(buffer, pinfo, tree)
     local idc, res_com_end = string.find(buffer():string(), " ", 0, true)
     local res_com = buffer(1, res_com_end - 2):string()
 
-    print("Buffer len: " .. proto_len)
-    local response_type, msg_splits = SplitByQuotes(buffer():string())
+    --split incoming messages to individual strings by unescaped quotes
+    local response_type, msg_splits = SplitByQuotes(buffer():string(), pinfo)
+    if (response_type == -1) then return end
 
     --payload (and command) data
     local payload_len = proto_len - res_com_end - 1  --calculate payload length
@@ -148,63 +138,70 @@ function Isa_entry.dissector(buffer, pinfo, tree)
 
     --(SERVER)--
     if (res_com == "ok" or res_com == "err") then
-        isa_tree:add(Msg_sender, "server")    --add sender
-        isa_tree:add(Response, buffer(1, res_com_end - 2))    --add response
-        
+        isa_tree:add(Msg_sender, "server")                                            --add sender
+        isa_tree:add(Response, buffer(1, res_com_end - 2))                            --add response
         local payload_tree = isa_tree:add(Payload_entry, payload_buffer(), "Payload") --add payload entry
-        payload_tree:add(Payload_length, payload_buffer(), payload_len)         --get payload length
-        payload_tree:add(Payload_raw, payload_buffer())                         --print raw payload
-        
+        payload_tree:add(Payload_length, payload_buffer(), payload_len)               --get payload length
+        payload_tree:add(Payload_raw, payload_buffer())                               --print raw payload
+        local msg_buffer                                                              --for code clarity
+
         --raw payload and login (for now)
         if (response_type == 0 or response_type == 4) then
-            payload_tree:add(Payload_msg_cnt, payload_buffer(), 1)  --should I print this?
-            --message_tree = payload_tree:add(Message_entry, buffer(msg_splits[1][1] - 1, msg_splits[1][2] - msg_splits[1][1]), "Message 1")
-            --message_tree:add(Message_body, buffer(msg_splits[1][1], msg_splits[1][3] - 2))
+            payload_tree:add(Payload_msg_cnt, payload_buffer(), 1)
 
         --single message
         elseif (response_type == 1) then
             payload_tree:add(Payload_msg_cnt, payload_buffer(), 1)
-            local message_tree = payload_tree:add(Message_entry, buffer(msg_splits[1][1] - 1, msg_splits[3][2] - msg_splits[1][1]), "Message 1")
-            message_tree:add(Message_sender, buffer(msg_splits[1][1], msg_splits[1][3] - 2))
-            message_tree:add(Message_sub,    buffer(msg_splits[2][1], msg_splits[2][3] - 2))
-            message_tree:add(Message_body,   buffer(msg_splits[3][1], msg_splits[3][3] - 2))
+            msg_buffer = buffer(msg_splits[1][1] - 1, msg_splits[3][2] - msg_splits[1][1])   --get message buffer (to highlight the current message)
+            local message_tree = payload_tree:add(Message_entry, msg_buffer(), "Message 1")  --add message tree entry
+            message_tree:add(Message_sender, buffer(msg_splits[1][1], msg_splits[1][3] - 2)) --add sender
+            message_tree:add(Message_sub,    buffer(msg_splits[2][1], msg_splits[2][3] - 2)) --add subject
+            message_tree:add(Message_body,   buffer(msg_splits[3][1], msg_splits[3][3] - 2)) --add body
 
         --multiple messages
         elseif (response_type == 2) then
             payload_tree:add(Payload_msg_cnt, payload_buffer(), #msg_splits / 2)
+            --loop the splits untill all messages are added
             for i = 1, #msg_splits / 2 do
                 local si = i * 2
-                local message_tree = payload_tree:add(Message_entry, buffer(msg_splits[si - 1][1] - 1, msg_splits[si][2] - msg_splits[si - 1][1]), "Message " .. tostring(i))
+                msg_buffer = buffer(msg_splits[si - 1][1] - 1, msg_splits[si][2] - msg_splits[si - 1][1])
+                local message_tree = payload_tree:add(Message_entry, msg_buffer(), "Message " .. tostring(i))
                 message_tree:add(Message_sender, buffer(msg_splits[si - 1][1],     msg_splits[si - 1][3] - 2))
                 message_tree:add(Message_sub,    buffer(msg_splits[si][1],         msg_splits[si][3] - 2))
             end
-        
-        --not message
-        --elseif (response_type == 3) then
+        --no messages do nothing
         end
 
     --(CLIENT)--
     else
-        isa_tree:add(Msg_sender, "client")    --add sender
-        isa_tree:add(Command, buffer(1, res_com_end - 2))                                  --add command
+        isa_tree:add(Msg_sender, "client")                                                    --add sender
+        isa_tree:add(Command, buffer(1, res_com_end - 2))                                     --add command
         local arguments_tree = isa_tree:add(Arguments_entry, payload_buffer(), "Argument(s)") --add arguments entry
-        --arguments = SplitLine(payload_buffer():string(), " \"")                           --get arguments
-        arguments_tree:add(Argument_cnt, #msg_splits)                                    --add argument count
+        arguments_tree:add(Argument_cnt, #msg_splits)                                         --add argument count
 
+        --1 argument
         if (res_com == "logout" or res_com == "list") then
-            arguments_tree:add(Argument_session_hash, buffer(msg_splits[1][1], msg_splits[1][3] - 2))   --add session hash without '"' and ')'
+            arguments_tree:add(Argument_session_hash, buffer(msg_splits[1][1], msg_splits[1][3] - 2)) --add session hash without '"' and ')'
         end
+
+        --2 arguments
         if (res_com == "register" or res_com == "login") then
             arguments_tree:add(Argument_user,        buffer(msg_splits[1][1], msg_splits[1][3] - 2)) --add username
             arguments_tree:add(Argument_passwd_hash, buffer(msg_splits[2][1], msg_splits[2][3] - 2)) --add password hash
         end
+
+        --fetch is special
         if (res_com == "fetch") then
+            --get the msg id we want to fetch (from the back)
             local id_len, id_start = buffer():string():reverse():find(" ", 0, true)
             id_start = buffer():len() - id_start + 2    --+2 -> flip and space
             id_len = buffer():len() - id_start
+
             arguments_tree:add(Argument_session_hash, buffer(msg_splits[1][1], msg_splits[1][3] - 2))
-            arguments_tree:add(Argument_msg_id,       buffer(id_start - 1, id_len))    --add message id
+            arguments_tree:add(Argument_msg_id,       buffer(id_start - 1, id_len)) --add message id
         end
+
+        --send is special
         if (res_com == "send") then
             arguments_tree:add(Argument_session_hash, buffer(msg_splits[1][1], msg_splits[1][3] - 2))
             arguments_tree:add(Argument_recipient,    buffer(msg_splits[2][1], msg_splits[2][3] - 2))   --add recipient

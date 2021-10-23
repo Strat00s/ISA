@@ -102,16 +102,8 @@ string loadHash() {
 //split string by regex delimiter
 vector<string> splitByDelimiter(string s, string rgx_exp) {
     vector<string> splits;
-
-    /*  old regex implementation
-    regex rgx(rgx_exp, regex::optimize);
-    //iterate and get everything in quotes
-    for (auto it = sregex_iterator(s.begin(), s.end(), rgx); it != sregex_iterator(); it++) 
-        splits.push_back(it->str());
-    */
     
     int start_index = -1;
-    int end_index = -1;
     for (int i = 0; i < s.length(); i++) {
         cout << i << " | " << s.substr(i, 2) << " | " << s.substr(i, 1);
         //skip slashes
@@ -119,24 +111,20 @@ vector<string> splitByDelimiter(string s, string rgx_exp) {
             i++;
         //check for free quotes
         else if (s.substr(i, 1) == "\"") {
-            if (end_index == -1 && start_index != -1) {
+            if (start_index != -1) {
                 end_index = i;
-                cout << " < end";
+                cout << " < end" << endl;
+                cout << "Got string (" << start_index << ":" << i << "):" << endl;
+                cout << "  '" << s.substr(start_index, i - start_index + 1) << "'" << endl;
+                splits.push_back(s.substr(start_index, i - start_index + 1));
+                start_index = -1;
             }
-            if (start_index == -1) {
+            else {
                 start_index = i;
                 cout << " < start";
             }
         }
         cout << endl;
-        //once both start and end quotes are acquired, get the substring
-        if (start_index != -1 && end_index != -1) {
-            cout << "Got string (" << start_index << ":" << end_index << "):" << endl;
-            cout << "  '" << s.substr(start_index, end_index - start_index + 1) << "'" << endl;
-            splits.push_back(s.substr(start_index, end_index - start_index + 1));
-            start_index = -1;
-            end_index = -1;
-        }
     }
 
     return splits;
@@ -164,6 +152,9 @@ string replaceInString(string s, string x, string y) {
     return s;
 }
 
+
+//TODO rewamp
+//TODO maybe add ipv6?
 int sendAndReceive(LineArgs *line_args) {
     int socket_fd, wr;
     struct sockaddr_in server;
@@ -299,6 +290,7 @@ int sendAndReceive(LineArgs *line_args) {
     return 0;
 }
 
+//TODO rewamp
 //get arguments, commands and so on
 int parseArguments(int argc, char *argv[], LineArgs *line_args) {
     bool help = false;
@@ -405,8 +397,6 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
         cout << "     Show this help" << endl;
         cout << "  --" << endl;
         cout << "     Do not treat any remaining argument as a switch (at this level)\n" << endl;
-        cout << " Multiple single-letter switches can be combined after" << endl;
-        cout << " one `-`. For example, `-h-` is the same as `-h --`." << endl;
         cout << " Supported commands:" << endl;
         cout << "   register <username> <password>" << endl;
         cout << "   login <username> <password>" << endl;
@@ -422,10 +412,8 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
     
     //"fix" all arguments to make them protocol correct
     for (int i = 0; i < line_args->arguments.size(); i++) {
-        //line_args->arguments[i] = trim(line_args->arguments[i]);  //trim spaces for later easier response parsing
         line_args->arguments[i] = replaceInString(line_args->arguments[i], "\\", "\\\\"); //escape '\'
         line_args->arguments[i] = replaceInString(line_args->arguments[i], "\"", "\\\""); //escape '"'
-        //'\n' is escaped automatically???
     }
     return -1;
 }
@@ -436,9 +424,15 @@ int main(int argc, char *argv[]) {
 
     /*----(argument parsing)----*/
     LineArgs line_args;
-    int early_exit = parseArguments(argc, argv, &line_args);
-    if (early_exit >= 0)
-        return early_exit;
+    int rc = parseArguments(argc, argv, &line_args);
+    if (rc >= 0)
+        return rc;
+
+    //rc = send(%line_args)
+    //if (rc >= 0)
+    //    return rc;
+
+    //return receive(&line_args)
 
     //cout << "port: " << line_args.port << endl;
     //cout << "address: " << line_args.address << endl;

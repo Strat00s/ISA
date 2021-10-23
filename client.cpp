@@ -48,31 +48,40 @@ int errorExit(string msg, int err_code) {
 
 //TODO comments
 string base64Encode(string s) {
-    //cout << "String to decode: " << s << endl;
     unsigned char base64_table[65] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    int len = s.length();
-    int j = 0;
-    int p = len % 3;
-    int last = len - p;
-    string encoded(4 * (len + 2) / 3, '='); //fill string with padding
 
-    for (size_t i = 0; i < last; i += 3) {
-        int n = int(s[i]) << 16 | int(s[i + 1]) << 8 | s[i + 2];
-        encoded[j++] = base64_table[n >> 18];
-        encoded[j++] = base64_table[n >> 12 & 0x3F];
-        encoded[j++] = base64_table[n >> 6  & 0x3F];
-        encoded[j++] = base64_table[n       & 0x3F];
+    int s_len       = s.length();      //save string length
+    int s_left      = s_len % 3;       //how manny extra characters are left
+    int s_loop_end  = s_len - s_left;  //end of looped encoding
+    int s_index;
+
+    int val = 0;
+
+    string encoded(4 * (s_len + 2) / 3, '='); //fill encoded string with padding
+    int e_index = 0;                          //current index inside encoded string
+
+    //fill encoded string as far as we can
+    for (s_index = 0; s_index < s_loop_end; s_index += 3) {
+        val = int(s[s_index]) << 16 | int(s[s_index + 1]) << 8 | s[s_index + 2]; //take 3 letters, shift them and save all of them to single variable
+        encoded[e_index++] = base64_table[val >> 18];                            //get first sextet
+        encoded[e_index++] = base64_table[val >> 12 & 0b111111];                 //get second
+        encoded[e_index++] = base64_table[val >> 6  & 0b111111];                 //third
+        encoded[e_index++] = base64_table[val       & 0b111111];                 //fourth    (3 * 8 = 4 * 6)
     }
 
-    //padding is required
-    if (p) {
-        int n = --p ? int(s[last]) << 8 | s[last + 1] : s[last];
-        encoded[j++] = base64_table[p ? n >> 10 & 0x3F  : n >> 2];
-        encoded[j++] = base64_table[p ? n >> 4  & 0x03F : n << 4 & 0x3F];
-        encoded[j++] = p ? base64_table[n << 2  & 0x3F] : '=';
+    //take care of the remaining characters
+    if (s_left == 2) {
+        val = int(s[s_loop_end]) << 8 | int(s[s_loop_end + 1]);
+        encoded[e_index++] = base64_table[val >> 10 & 0b111111];    //18 - 8 = 10
+        encoded[e_index++] = base64_table[val >> 4  & 0b111111];
+        encoded[e_index++] = base64_table[val << 2  & 0b111111];
+    }
+    if (s_left == 1) {
+        val = int(s[s_loop_end]);
+        encoded[e_index++] = base64_table[val >> 2];                //18 - 8 - 8 = 2
+        encoded[e_index++] = base64_table[val << 4 & 0b111111];
     }
 
-    //cout << encoded << endl;
     return encoded;
 }
 
@@ -112,7 +121,6 @@ vector<string> splitByDelimiter(string s, string rgx_exp) {
         //check for free quotes
         else if (s.substr(i, 1) == "\"") {
             if (start_index != -1) {
-                end_index = i;
                 cout << " < end" << endl;
                 cout << "Got string (" << start_index << ":" << i << "):" << endl;
                 cout << "  '" << s.substr(start_index, i - start_index + 1) << "'" << endl;

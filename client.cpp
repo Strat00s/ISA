@@ -5,6 +5,9 @@
 #include <iostream>
 #include <fstream>
 #include <vector>
+#include <arpa/inet.h>
+#include <sys/types.h>
+#include <sys/socket.h>
 #include <netdb.h>
 
 using namespace std;
@@ -136,40 +139,49 @@ int StringToNumber(string s) {
 
 //replace x with y in s
 string replaceInString(string s, string x, string y) {
-    cout << s << " > ";
     int pos = 0;
     while ((pos = s.find(x, pos)) != string::npos) {
         s.replace(pos, x.length(), y);
         pos = pos + y.length();  //skip the newly escaped character
     }
-    cout << s << endl;
     return s;
 }
 
 
 /*----(networking)----*/
 int setupAndconnect(int *socket_fd, string address, int port) {
-    struct sockaddr_in server;
-    struct hostent *host_entry;
-    
-    //create socket file descriptor
-    *socket_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (*socket_fd < 0) 
-        return errorExit("Failed to open socket", 1);
-    
-    //TODO ipv6 via gethostinfo?
-    //get host (ip/hostname)
-    host_entry = gethostbyname(address.c_str());
-    if (host_entry == NULL) 
-        return errorExit("No such host '" + address + "'", 1);
-    
-    server.sin_family = AF_INET;                                                //set address family
-    server.sin_port = htons(port);                                   //set port
-    memcpy(&server.sin_addr, host_entry->h_addr_list[0], host_entry->h_length); //set ip
-    
-    //try and connect
-    if (connect(*socket_fd, (struct sockaddr *) &server, sizeof(server)) < 0) 
-        return errorExit("Failed to connect to host", 1);
+    struct addrinfo *res, hint = {0};
+    hint.ai_family = AF_UNSPEC;
+    hint.ai_socktype = SOCK_STREAM;
+    struct sockaddr_in *ipv4;
+    struct sockaddr_in6 *ipv6;
+    int rc = -1;
+
+    //get host info
+    if (getaddrinfo(address.c_str(), to_string(port).c_str(), &hint, &res) != 0) {
+        return errorExit("Falied to get host '" + address + "'", 1);
+    }
+
+    //go through all possible hosts and get the info
+    for(; res != NULL; res = res->ai_next) {
+
+        //if we get ipv4 or ipv6, create socket and try to connect
+        if (res->ai_family == AF_INET6 || res->ai_family == AF_INET) {
+            *socket_fd = socket(res->ai_family, SOCK_STREAM, 0);
+            if (*socket_fd < 0) 
+                return errorExit("Failed to create socket", 1);
+            if ((rc = connect(*socket_fd, (struct sockaddr *) res->ai_addr, res->ai_addrlen)) < 0)
+                continue;
+            break;
+        }
+    }
+
+    freeaddrinfo(res); //free host info
+
+    if (rc < 0) {
+        close(*socket_fd);
+        return errorExit("Failed to connect to host '" + address + "'", 1);
+    }
     
     return 0;
 }
@@ -182,8 +194,10 @@ int mySend(int socket_fd, string command, vector<string> arguments) {
     //add hash only on supported commands
     if (command != "login" && command != "register") {
         string hash = loadHash();
-        if (hash == ".") 
+        if (hash == ".") {
+            close(socket_fd);
             return errorExit("Not logged in", 1);
+        }
         request += " " + hash;
     }
 
@@ -196,11 +210,11 @@ int mySend(int socket_fd, string command, vector<string> arguments) {
     }
     request += ")";
 
-    cout << "request: " << request << endl;
-    
     //write request to socket
-    if (write(socket_fd, request.c_str(), request.length()) < 0) 
+    if (write(socket_fd, request.c_str(), request.length()) < 0) {
+        close(socket_fd);
         return errorExit("Failed writing to socket", 1);
+    }
 
     return 0;
 }
@@ -215,10 +229,11 @@ int myReceive(int socket_fd, string *response) {
         memset(buffer, 0, MAX_BUFFER_SIZE);                 //clear
     } while(rc > 0);
 
-    if (rc < 0) 
+    if (rc < 0) {
+        close(socket_fd);
         return errorExit("Failed reading from socket", 1);
-    close(socket_fd);   //close socket
-
+    }
+    
     return 0;
 }
 
@@ -229,9 +244,7 @@ int printResponse(string response, string command) {
 
     //un-escape everything
     for (int i = 0; i < splits.size(); i++){
-        cout << splits[i] << " > ";
         splits[i] = splits[i].substr(1, splits[i].length() - 2);    //remove quotes, as they are no longer neede and would only cause trouble
-        cout << splits[i] << " > ";
         for (int j = 0; j < splits[i].length(); j++) {
             //un-escape '\'
             if (splits[i].substr(j, 2) == "\\\\")
@@ -243,7 +256,6 @@ int printResponse(string response, string command) {
             else if (splits[i].substr(j, 2) == "\\\"")
                 splits[i].replace(j, 2, "\"");
         }
-        cout << splits[i] << endl; 
     }
 
     if (response.substr(1, 2) == "ok") {
@@ -301,7 +313,6 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
 
     //loop through all arguments (skip first one)
     for (int i = 1; i < argc; i++) {
-        cout << argv[i] << endl;
         string argument = string(argv[i]);  //save current argument
 
         //help parsing
@@ -439,6 +450,8 @@ int main(int argc, char *argv[]) {
     //get response
     if ((rc = myReceive(socket_fd, &response)) > 0)
         return rc;
+    
+    close(socket_fd);
     
     //print response
     if ((rc = printResponse(response, line_args.command)) > 0)

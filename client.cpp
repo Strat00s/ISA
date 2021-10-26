@@ -14,25 +14,41 @@ using namespace std;
 
 /*----(macros)----*/
 #define DEFAULT_ADDRESS "localhost"
-#define DEFAULT_PORT 32323
+#define DEFAULT_PORT "32323"
 #define MAX_BUFFER_SIZE 256
 #define SESSION_HASH_FILE "login-token"
 
 /*----(structs)----*/
+/**
+ * @brief main struct for arguments and commands
+ * 
+ */
 struct LineArgs{
     string address = DEFAULT_ADDRESS;
-    int port = DEFAULT_PORT;
+    string port = DEFAULT_PORT;
     string command = "NONE";
     vector<string> arguments;
 };
 
 
 /*----(Exit handeling)----*/
+/**
+ * @brief signal call back for ctrl+c
+ * 
+ * @param signal 
+ */
 void signalCallback(int signal) {
     cerr << "Process interrupted by the user" << endl;
     exit(1);
 }
 
+/**
+ * @brief Helper function for easier error message printing
+ * 
+ * @param msg message to be printed
+ * @param err_code error which will be returned
+ * @return err_code
+ */
 int errorExit(string msg, int err_code) {
     cerr << msg << endl;
     return err_code; //exit(err_code);
@@ -41,6 +57,12 @@ int errorExit(string msg, int err_code) {
 
 /*----(base 64)----*/
 //only encoding is needed
+/**
+ * @brief Base64 encoding
+ * 
+ * @param s string to encode
+ * @return string encoded in base64
+ */
 string base64Encode(string s) {
     unsigned char base64_table[65] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
@@ -82,6 +104,12 @@ string base64Encode(string s) {
 
 /*----(file operations)----*/
 //save hash to file
+/**
+ * @brief Save login/session hash to file
+ * 
+ * @param hash string which should be saved
+ * @return returns 0 on success and 1 on failure
+ */
 int saveHash(string hash) {
     ofstream hash_file(SESSION_HASH_FILE, ofstream::trunc); //open file in overwrite mode
     if (hash_file.fail())
@@ -92,18 +120,29 @@ int saveHash(string hash) {
 }
 
 //load hash from file
+/**
+ * @brief Load session hash from file
+ * 
+ * @return string containing first line from file
+ */
 string loadHash() {
     string session_hash;
     ifstream hash_file(SESSION_HASH_FILE);
     if (hash_file.fail())
-        return ".";   //if something went wrong, return character that can't be created via base64 encoding
-    getline(hash_file, session_hash);   //get hash from file
+        return ".";                   //if something went wrong, return character that can't be created via base64 encoding
+    getline(hash_file, session_hash); //get hash from file
     return session_hash;
 }
 
 
 /*----(String operations)----*/
 //split string by regex delimiter
+/**
+ * @brief Split string by unescaped quotes
+ * 
+ * @param s string which should be split
+ * @return vector<string> containing individual splits
+ */
 vector<string> splitByQuotes(string s) {
     vector<string> splits;
     int start_index = -1;
@@ -127,17 +166,14 @@ vector<string> splitByQuotes(string s) {
     return splits;
 }
 
-//check and convert string to number
-int StringToNumber(string s) {
-    //check if all chars are numbers
-    for (int i = 0; i < s.length(); i++) {
-        if (!isdigit(s[i]))
-            return -1;
-    }
-    return stoi(s);
-}
-
-//replace x with y in s
+/**
+ * @brief Replace any text with any other text in string
+ * 
+ * @param s string where we want to replace
+ * @param x substring which should be replaced
+ * @param y substring which we will replace it with
+ * @return string with X replaced by Y
+ */
 string replaceInString(string s, string x, string y) {
     int pos = 0;
     while ((pos = s.find(x, pos)) != string::npos) {
@@ -149,7 +185,15 @@ string replaceInString(string s, string x, string y) {
 
 
 /*----(networking)----*/
-int setupAndconnect(int *socket_fd, string address, int port) {
+/**
+ * @brief Setup socket, host info and connect to server
+ * 
+ * @param *socket_fd pointer to socket file descriptor 
+ * @param address server address (ipv4, ipv6, domain name)
+ * @param port service port
+ * @return returns 0 on success, 1 on failure
+ */
+int setupAndconnect(int *socket_fd, string address, string port) {
     struct addrinfo *res, hint = {0};
     hint.ai_family = AF_UNSPEC;
     hint.ai_socktype = SOCK_STREAM;
@@ -158,7 +202,7 @@ int setupAndconnect(int *socket_fd, string address, int port) {
     int rc = -1;
 
     //get host info
-    if (getaddrinfo(address.c_str(), to_string(port).c_str(), &hint, &res) != 0) {
+    if (getaddrinfo(address.c_str(), port.c_str(), &hint, &res) != 0) {
         return errorExit("Falied to get host '" + address + "'", 1);
     }
 
@@ -186,6 +230,14 @@ int setupAndconnect(int *socket_fd, string address, int port) {
     return 0;
 }
 
+/**
+ * @brief Send data to server
+ * 
+ * @param socket_fd socket file descriptor
+ * @param command command to send
+ * @param arguments arguments vector
+ * @return returns 0 on success, 1 on failure
+ */
 int mySend(int socket_fd, string command, vector<string> arguments) {
     string request; //request payload
 
@@ -219,6 +271,13 @@ int mySend(int socket_fd, string command, vector<string> arguments) {
     return 0;
 }
 
+/**
+ * @brief Receive data from server
+ * 
+ * @param socket_fd socket file descriptor
+ * @param *response pointer to string where server response will be stored
+ * @return returns 0 on success, 1 on failure
+ */
 int myReceive(int socket_fd, string *response) {
     int rc;
     char buffer[MAX_BUFFER_SIZE] = {0};
@@ -239,6 +298,13 @@ int myReceive(int socket_fd, string *response) {
 
 
 /*----(response parsing)----*/
+/**
+ * @brief Parse response and print it
+ * 
+ * @param response string containing server resposne
+ * @param command client's command which was used to invoke this response
+ * @return returns 0 on success, 1 on failure
+ */
 int printResponse(string response, string command) {
     vector<string> splits = splitByQuotes(response);  //split response by regex
 
@@ -306,6 +372,14 @@ int printResponse(string response, string command) {
 
 //get arguments, commands and so on
 /*----(argument parsing)----*/
+/**
+ * @brief Inut arguments parsing
+ * 
+ * @param argc main argc
+ * @param argv main argv
+ * @param line_args struct to save arguments and commands
+ * @return returns 0 on success, 1 on failure
+ */
 int parseArguments(int argc, char *argv[], LineArgs *line_args) {
     bool help = false;
     bool addr_set = false;
@@ -340,10 +414,10 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
 
             if (argc < i + 2)
                 return errorExit("client: the \"" + argument + "\" option needs 1 argument, but 0 provided", 1);
-            line_args->port = StringToNumber(string(argv[i + 1]));
+            line_args->port = string(argv[i + 1]);  //save port
 
-            //return if port is not a number
-            if (line_args->port < 0)
+            //check that port is a number, otherwise exit
+            if (line_args->port.find_first_not_of("0123456789") != string::npos)
                 return errorExit("Port number is not a string", 1);
             i++;
         }

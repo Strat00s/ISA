@@ -32,8 +32,7 @@ struct LineArgs{
 
 
 /*----(Exit handeling)----*/
-/**
- * @brief signal call back for ctrl+c
+/** @brief signal callback for ctrl+c
  * 
  * @param signal 
  */
@@ -42,8 +41,7 @@ void signalCallback(int signal) {
     exit(1);
 }
 
-/**
- * @brief Helper function for easier error message printing
+/** @brief Helper function for easier error message printing
  * 
  * @param msg message to be printed
  * @param err_code error which will be returned
@@ -56,9 +54,7 @@ int errorExit(string msg, int err_code) {
 
 
 /*----(base 64)----*/
-//only encoding is needed
-/**
- * @brief Base64 encoding
+/** @brief Base64 encoding (taken from: https://stackoverflow.com/a/37109258)
  * 
  * @param s string to encode
  * @return string encoded in base64
@@ -103,9 +99,7 @@ string base64Encode(string s) {
 
 
 /*----(file operations)----*/
-//save hash to file
-/**
- * @brief Save login/session hash to file
+/** @brief Save login/session hash to file
  * 
  * @param hash string which should be saved
  * @return returns 0 on success and 1 on failure
@@ -120,8 +114,7 @@ int saveHash(string hash) {
 }
 
 //load hash from file
-/**
- * @brief Load session hash from file
+/** @brief Load session hash from file
  * 
  * @return string containing first line from file
  */
@@ -136,9 +129,7 @@ string loadHash() {
 
 
 /*----(String operations)----*/
-//split string by regex delimiter
-/**
- * @brief Split string by unescaped quotes
+/** @brief Split string by unescaped quotes
  * 
  * @param s string which should be split
  * @return vector<string> containing individual splits
@@ -166,8 +157,7 @@ vector<string> splitByQuotes(string s) {
     return splits;
 }
 
-/**
- * @brief Replace any text with any other text in string
+/** @brief Replace any text with any other text in string
  * 
  * @param s string where we want to replace
  * @param x substring which should be replaced
@@ -185,8 +175,7 @@ string replaceInString(string s, string x, string y) {
 
 
 /*----(networking)----*/
-/**
- * @brief Setup socket, host info and connect to server
+/** @brief Setup socket, host info and connect to server
  * 
  * @param *socket_fd pointer to socket file descriptor 
  * @param address server address (ipv4, ipv6, domain name)
@@ -197,8 +186,6 @@ int setupAndconnect(int *socket_fd, string address, string port) {
     struct addrinfo *res, hint = {0};
     hint.ai_family = AF_UNSPEC;
     hint.ai_socktype = SOCK_STREAM;
-    struct sockaddr_in *ipv4;
-    struct sockaddr_in6 *ipv6;
     int rc = -1;
 
     //get host info
@@ -230,8 +217,7 @@ int setupAndconnect(int *socket_fd, string address, string port) {
     return 0;
 }
 
-/**
- * @brief Send data to server
+/** @brief Send data to server
  * 
  * @param socket_fd socket file descriptor
  * @param command command to send
@@ -271,8 +257,7 @@ int mySend(int socket_fd, string command, vector<string> arguments) {
     return 0;
 }
 
-/**
- * @brief Receive data from server
+/** @brief Receive data from server
  * 
  * @param socket_fd socket file descriptor
  * @param *response pointer to string where server response will be stored
@@ -284,7 +269,7 @@ int myReceive(int socket_fd, string *response) {
     //read from socket
     do {
         rc = read(socket_fd, buffer, MAX_BUFFER_SIZE - 1);  //read
-        *response += string(buffer);                         //save
+        *response += string(buffer);                        //save
         memset(buffer, 0, MAX_BUFFER_SIZE);                 //clear
     } while(rc > 0);
 
@@ -298,15 +283,14 @@ int myReceive(int socket_fd, string *response) {
 
 
 /*----(response parsing)----*/
-/**
- * @brief Parse response and print it
+/** @brief Parse response and print it
  * 
  * @param response string containing server resposne
  * @param command client's command which was used to invoke this response
  * @return returns 0 on success, 1 on failure
  */
 int printResponse(string response, string command) {
-    vector<string> splits = splitByQuotes(response);  //split response by regex
+    vector<string> splits = splitByQuotes(response);  //split response by unescaped quotes
 
     //un-escape everything
     for (int i = 0; i < splits.size(); i++){
@@ -325,23 +309,21 @@ int printResponse(string response, string command) {
     }
 
     if (response.substr(1, 2) == "ok") {
-        cout << "SUCCESS: ";
-
+        //command specific parsing
         if (command == "logout") {
             if (remove("login-token"))    //remove token file
                 return errorExit("ERROR failed to remove login token", 1);
-            cout << splits[0] << endl;
+            cout << "SUCCESS: " << splits[0] << endl;
         }
 
-        //command specific parsing
         else if (command == "login") {
             if (saveHash("\"" + splits[1] + "\""))
                 return errorExit("ERROR failed to save login token", 1);
-            cout << splits[0] << endl;
+            cout << "SUCCESS: " << splits[0] << endl;
         }
 
         else if (command == "fetch") {
-            cout << endl << endl;
+            cout << "SUCCESS: " << endl << endl;
             cout << "From: " << splits[0] << endl;
             cout << "Subject: " << splits[1] << endl;
             cout << endl;
@@ -349,7 +331,7 @@ int printResponse(string response, string command) {
         }
 
         else if (command == "list") {
-            cout << endl;
+            cout << "SUCCESS: " << endl;
             for (int i = 0; i < splits.size(); i += 2) {
                 cout << i / 2 + 1 << ":" << endl;
                 cout << "  From: " << splits[i] << endl;
@@ -359,7 +341,7 @@ int printResponse(string response, string command) {
 
         //payloads without splits
         else
-            cout << splits[0] << endl;
+            cout << "SUCCESS: " << splits[0] << endl;
     }
     else if (response.substr(1, 3) == "err")
         cout << "ERROR: " << splits[0] << endl;
@@ -372,8 +354,7 @@ int printResponse(string response, string command) {
 
 //get arguments, commands and so on
 /*----(argument parsing)----*/
-/**
- * @brief Inut arguments parsing
+/** @brief Inut arguments parsing
  * 
  * @param argc main argc
  * @param argv main argv
@@ -423,18 +404,15 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
         }
 
         //command and argument "parsing"
-        //register and login
         else if (argument == "register" || argument == "login") {
             if (argc - (i + 1) != 2)
                 return errorExit(argument + " <username> <password>", 1);
             line_args->command = argument;
             line_args->arguments.push_back(string(argv[i + 1]));
-            cout << string(argv[i + 1]) << endl;
             line_args->arguments.push_back(base64Encode(string(argv[i + 2])));
             break;
         }
 
-        //list
         else if (argument == "list" || argument == "logout") {
             if (argc - (i + 1) != 0)
                 return errorExit(argument, 1);
@@ -442,7 +420,6 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
             break;
         }
 
-        //send
         else if (argument == "send") {
             if (argc - (i + 1) != 3)
                 return errorExit(argument + " <recipient> <subject> <body>", 1);
@@ -453,7 +430,6 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
             break;
         }
 
-        //fetch
         else if (argument == "fetch") {
             if (argc - (i + 1) != 1)
                 return errorExit(argument + " <id>", 1);
@@ -493,10 +469,11 @@ int parseArguments(int argc, char *argv[], LineArgs *line_args) {
     if(line_args->command == "NONE")
         return errorExit("client: expects <command> [<args>] ... on the command line, given 0 arguments", 1);
     
-    //"fix" all arguments to make them protocol correct
+    //escape required characters
     for (int i = 0; i < line_args->arguments.size(); i++) {
         line_args->arguments[i] = replaceInString(line_args->arguments[i], "\\", "\\\\"); //escape '\'
         line_args->arguments[i] = replaceInString(line_args->arguments[i], "\"", "\\\""); //escape '"'
+        line_args->arguments[i] = replaceInString(line_args->arguments[i], "\n", "\\n"); //escape '\n'; in testing, the new line was always somehow escaped automatically
     }
     return -1;
 }

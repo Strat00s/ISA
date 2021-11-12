@@ -84,3 +84,6 @@ ERROR: unknown user
 SUCCESS: logged out
 
 Not logged in
+
+unknown command
+

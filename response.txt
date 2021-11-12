@@ -1,0 +1,86 @@
+SUCCESS: registered user test
+
+ERROR: user already registered
+
+SUCCESS: user logged in
+
+SUCCESS:
+
+ERROR: wrong arguments
+
+ERROR: wrong arguments
+
+ERROR: message id not found
+
+SUCCESS: registered user test ///""
+
+SUCCESS: message sent
+
+SUCCESS: message sent
+
+SUCCESS: message sent
+
+SUCCESS:
+1:
+  From: test
+  Subject: test with 
+ new line
+2:
+  From: test
+  Subject: test with  new line
+3:
+  From: test
+  Subject: sub with " and \ and \"\"\"\"""\\\" 
+
+SUCCESS:
+From: test
+Subject: test with 
+ new line
+test
+SUCCESS:
+From: test
+Subject: sub with " and \ and \"\"\"\"""\\\" 
+
+body with 
+new line
+adn other trash \\"
+
+
+usage: client [ <option> ... ] <command> [<args>] ...
+
+<option> is one of
+
+  -a <addr>, --address <addr>
+     Server hostname or address to connect to
+  -p <port>, --port <port>
+     Server port to connect to
+  --help, -h
+     Show this help
+  --
+     Do not treat any remaining argument as a switch (at this level)
+
+ Multiple single-letter switches can be combined after
+ one `-`. For example, `-h-` is the same as `-h --`.
+ Supported commands:
+   register <username> <password>
+   login <username> <password>
+   list
+   send <recipient> <subject> <body>
+   fetch <id>
+   logout
+
+ERROR: unknown recipient
+
+send <recipient> <subject> <body>
+
+fetch <id>
+
+register <username> <password>
+
+login <username> <password>
+
+ERROR: unknown user
+
+SUCCESS: logged out
+
+Not logged in

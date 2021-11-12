@@ -1,0 +1,29 @@
+1 ./client_d register test test
+2 ./client_d register test test
+3 ./client_d login test test
+4 ./client_d list
+5 ./client_d fetch 0
+6 ./client_d fetch -1
+7 ./client_d fetch 1
+8 ./client_d register 'test ///""' ''
+9 ./client_d send test "test with 
+ new line" test
+10 ./client_d send test "test with \
+ new line" test
+11 ./client_d send test 'sub with " and \ and \"\"\"\"""\\\" ' "body with 
+new line
+adn other trash \\\\\"
+
+"
+12 ./client_d list
+13 ./client_d fetch 1
+14 ./client_d fetch 3
+15 ./client_d --help
+16 ./client_d send nobody adw awd
+17 ./client_d send test awd
+18 ./client_d fetch
+19 ./client_d register
+20 ./client_d login nobod
+21 ./client_d login nobody test
+22 ./client_d logout
+23 ./client_d logout

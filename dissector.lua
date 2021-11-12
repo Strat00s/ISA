@@ -44,7 +44,7 @@ Payload_entry.fields = {Argument_cnt, Argument_session_hash, Argument_recipient,
 
 
 
---slightly edited function from client
+--slightly edited function from client.cpp
 --responses to commands
     --err, send, logout, register: 1 bracket pair,  1 string    -> raw payload
     --fetch:                       2 bracket pairs, 3 strings   -> message
@@ -72,7 +72,7 @@ function SplitByQuotes(s, pinfo)
             bracket_cnt = bracket_cnt - 1
         end
 
-        --exit or request more data
+        --exit or request more data when at the end of the string
         if (i >= #s) then
             
             --request another segment once end of the current buffer is reached and we still dont have the entire response
@@ -114,8 +114,12 @@ end
 
 --main function for dissecting
 function Isa_entry.dissector(buffer, pinfo, tree)
-    local proto_len = buffer:len()       --entire protocol length
-    if proto_len < 7 then return end    --no data -> no protocol
+    local proto_len = buffer:len() --entire protocol length
+
+    --no data -> no protocol
+    if proto_len < 7 then
+        return
+    end
 
     --(ISA ENTRY)--
     pinfo.cols.protocol = Isa_entry.name --rename collumn to ISA
@@ -138,6 +142,7 @@ function Isa_entry.dissector(buffer, pinfo, tree)
 
     --(SERVER)--
     if (res_com == "ok" or res_com == "err") then
+        pinfo.cols.info = "Server response - " .. res_com
         isa_tree:add(Msg_sender, "server")                                            --add sender
         isa_tree:add(Response, buffer(1, res_com_end - 2))                            --add response
         local payload_tree = isa_tree:add(Payload_entry, payload_buffer(), "Payload") --add payload entry
@@ -174,6 +179,7 @@ function Isa_entry.dissector(buffer, pinfo, tree)
 
     --(CLIENT)--
     else
+        pinfo.cols.info = "Client request - " .. res_com
         isa_tree:add(Msg_sender, "client")                                                    --add sender
         isa_tree:add(Command, buffer(1, res_com_end - 2))                                     --add command
         local arguments_tree = isa_tree:add(Arguments_entry, payload_buffer(), "Argument(s)") --add arguments entry
@@ -214,4 +220,3 @@ end
 --specify port for ISA protocol
 local tcp_port = DissectorTable.get("tcp.port")
 tcp_port:add(32323, Isa_entry)
-tcp_port:add(16853, Isa_entry)  --old port used for testing

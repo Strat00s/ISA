@@ -244,7 +244,7 @@ int mySend(int socket_fd, string command, vector<string> arguments) {
 
     //add arguments to payload (fetch is special)
     if (command == "fetch") 
-        request += arguments[0];
+        request += " " + arguments[0];
     else {
         for (int i = 0; i < arguments.size(); i++)
             request += " \"" + arguments[i] + "\"";

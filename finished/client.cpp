@@ -69,8 +69,11 @@ string base64Encode(string s) {
 
     int val = 0;
 
-    string encoded(4 * (s_len + 2) / 3, '='); //fill encoded string with padding
-    int e_index = 0;                          //current index inside encoded string
+    //calculate remaining space that has to be filled with padding
+    if (s_len % 3) {
+        s_len += (3 - (s_len % 3));
+    string encoded(4 * (s_len) / 3, '='); //fill encoded string with padding
+    int e_index = 0;                      //current index inside encoded string
 
     //fill encoded string as far as we can
     for (s_index = 0; s_index < s_loop_end; s_index += 3) {

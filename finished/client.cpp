@@ -69,7 +69,7 @@ string base64Encode(string s) {
 
     int val = 0;
 
-    string encoded(4 * (s_len + (3 - (s_len % 3))) / 3, '='); //fill encoded string with padding
+    string encoded(4 * (s_len + 2) / 3, '='); //fill encoded string with padding
     int e_index = 0;                          //current index inside encoded string
 
     //fill encoded string as far as we can
